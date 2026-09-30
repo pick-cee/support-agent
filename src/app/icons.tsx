@@ -34,6 +34,17 @@ export function MicIcon(props: IconProps) {
   );
 }
 
+export function MicOffIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M9 9v2a3 3 0 0 0 5.1 2.1M15 10.5V6a3 3 0 0 0-5.7-1.3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 10.6 5M18.5 11a6.4 6.4 0 0 1-.4 2.2" />
+      <path d="M12 17.5V21" />
+      <path d="M4 4l16 16" />
+    </Svg>
+  );
+}
+
 export function EndCallIcon(props: IconProps) {
   return (
     <Svg {...props}>

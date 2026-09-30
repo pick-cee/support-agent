@@ -1087,30 +1087,106 @@
   color: var(--text-subtle);
 }
 
-.caption {
-  width: 100%;
-  max-width: 560px;
-  margin: 28px 0 0;
-  padding: 16px 20px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
+/* Once the conversation starts, the orb becomes a slim header that stays in
+   view, and the transcript takes the room below it. */
+.callHead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.callHeadText {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.call[data-compact="true"] {
+  align-items: stretch;
+  padding-top: 0;
   text-align: left;
-  animation: rise 320ms var(--ease-out) both;
 }
 
-.captionLabel {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  color: var(--accent-text);
+.call[data-compact="true"] .callHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-direction: row;
+  gap: 14px;
+  /* Pulled into the column's padding, so it spans the column and sits at the very top. */
+  margin: -36px -28px 8px;
+  padding: 14px 28px;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  animation: fade 240ms ease both;
 }
 
-.captionText {
-  margin: 6px 0 0;
+@media (max-width: 720px) {
+  .call[data-compact="true"] .callHead {
+    margin: -24px -16px 8px;
+    padding: 12px 16px;
+  }
+}
+
+.call[data-compact="true"] .callHeadText {
+  align-items: flex-start;
+}
+
+.call[data-compact="true"] .orb {
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  animation: none;
+}
+
+.call[data-compact="true"] .orbCore {
+  width: 36px;
+  height: 36px;
+  box-shadow: var(--shadow-sm);
+}
+
+.call[data-compact="true"] .callHeading {
   font-size: var(--font-size-md);
-  line-height: 1.6;
-  color: var(--text);
+}
+
+.call[data-compact="true"] .callStatusRow {
+  justify-content: flex-start;
+  min-height: 0;
+  margin-top: 4px;
+}
+
+.call[data-compact="true"] .callStatus {
+  padding: 2px 10px 2px 8px;
+  font-size: var(--font-size-xs);
+}
+
+.callStatus[data-state="muted"] .callStatusDot {
+  background: var(--danger);
+}
+
+.callTranscript {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The caller's words while they are still speaking: lighter, with a caret. */
+.msgCustomer[data-live="true"] {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.liveCaret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -2px;
+  background: var(--brand-primary);
+  animation: blink 1s steps(2, start) infinite;
 }
 
 .notice {

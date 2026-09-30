@@ -168,7 +168,7 @@ Caller (browser, @vapi-ai/web)          Caller (phone, optional)
        1. verify Vapi credential      5. run Claude Agent SDK query()
        2. upsert conversation         6. gate the structured answer
        3. cheap input checks          7. format for speech, stream
-       4. open SSE, filler if slow    8. write the turn record
+       4. open SSE, filler on lookup  8. write the turn record
                               |
             Claude Agent SDK  (Sonnet 5.5, no built-in tools)
                               |  MCP over Streamable HTTP, bearer token,
@@ -259,15 +259,28 @@ This is the heart of the system. Everything else serves it.
      support is busy, offer a callback, alert;
    - the user text is longer than `MAX_USER_CHARS`: keep the last
      `MAX_USER_CHARS` characters and note the truncation on the turn.
+   - the caller is plainly saying goodbye ("no thank you, that's all,
+     goodbye"), after the first turn, in at most `QUICK_GOODBYE_MAX_WORDS`
+     words, with nothing that could be another request (a question mark,
+     "but", "also", "can you"), and the last reply was not taking callback
+     details: say "You're welcome." and the fixed goodbye at once (added
+     2026-09-30, §20). Through the model it took 3.6 to 5.9 s, behind a
+     filler.
 5. **Open the stream.** Send SSE headers at once. Vapi's custom-LLM connection
    times out after `timeoutSeconds` (default 20) if no token arrives.
 6. **Run the agent** (§6) with a per-turn deadline of `TURN_DEADLINE_MS`. The
    request's abort signal is wired to the query's `AbortController`, so a
    caller who interrupts stops the work.
-7. **Filler, from code.** When the agent starts its first tool call, or at
-   `FILLER_AFTER_MS` with nothing to say yet, the runner streams one fixed
-   phrase ("One moment while I check that."). Code picks it from a short list.
-   It is spoken at most once per turn and it never claims anything.
+7. **Filler, from code.** When the agent starts its first tool call, and only
+   then, the runner streams one fixed phrase ("One moment while I check
+   that."), so it is always true. Code picks it from a short list. It is
+   spoken at most once per turn and it never claims anything. Every piece we
+   stream ends with Vapi's `<flush />` token, so the voice speaks it at once.
+   Changed 2026-09-30 (§20): a `FILLER_AFTER_MS` timer had the caller hear
+   "let me check that" before "goodbye", and without the flush Vapi's chunker
+   held the filler (exactly its 30-character minimum, nothing after it) until
+   the whole answer came, so the caller heard both together, 6 to 7 s after
+   they stopped on average (FAILURES 46).
 8. **Gate the answer** (§6.3). The final output is structured. Code checks it
    against what actually happened in this turn. A failed check gets one repair
    attempt if time allows, otherwise a safe fallback for that answer type.
@@ -443,8 +456,11 @@ still hears the question last:
   it in your RelayPay dashboard, or I can arrange for a specialist to check."
   (§8).
 - Closing: every `closing` reply ends with "Goodbye, and thanks for calling
-  RelayPay.", which is the assistant's `endCallPhrases` entry, so the call
-  ends on it. A typed conversation ends with "Thanks for contacting RelayPay
+  RelayPay.", whose tail "thanks for calling RelayPay" (`END_CALL_PHRASE` in
+  `vapi/assistant.ts`) is the assistant's `endCallPhrases` entry, so the call
+  ends on it. Vapi matches that phrase against its own transcription of the
+  assistant's audio, not the text we sent, and the transcription dropped the
+  comma and changed "Goodbye," so the whole sentence never matched (§20). A typed conversation ends with "Thanks for contacting RelayPay
   support." instead, and the page closes the conversation.
 - When a check fails after a ticket or an escalation already succeeded, what
   code wrote from that tool is still spoken, followed by the fallback: the
@@ -1152,7 +1168,7 @@ credential arrives as a bearer token and is checked in constant time.
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `status-update`      | Upsert the conversation: `started_at` on in-progress, `ended_at` on ended.                                                                   |
 | `end-of-call-report` | Store `endedReason`, Vapi's cost, the raw report. Compute `final_status` (§2.10). Build the summary. Handle an abandoned escalation (below). |
-| `hang`               | Raise a `vapi_hang` alert with the call id: Vapi noticed the assistant went quiet.                                                           |
+| `hang`               | Vapi noticed a caller waiting in silence for an answer. Write a `vapi_hang` event on the call. Raise one shared `vapi_hang` alert only when `HANG_ALERT_MIN_CALLS` different calls did so within `HANG_ALERT_WINDOW_MINUTES` (§15, changed 2026-09-30). |
 
 - Events are idempotent by call id and type. A duplicate is ignored.
 - The route answers 200 at once and does the work in `after()`.
@@ -1206,8 +1222,8 @@ reviewed diff.
 | `server`                 | `/api/vapi/events` with `server.headers` `Authorization: Bearer VAPI_SERVER_TOKEN`; `serverMessages`: `status-update`, `end-of-call-report`, `hang`                                     |
 | `maxDurationSeconds`     | `CALL_MAX_DURATION_S` (480)                                                                                                                                                             |
 | `silenceTimeoutSeconds`  | 30. Not a field of `CreateAssistantDto` in server SDK 2.0.1; its successor is a `customer.speech.timeout` hook. After `CALL_SILENCE_TIMEOUT_S` it says `SPOKEN.silenceGoodbye` and runs the `endCall` tool, once. |
-| `endCallPhrases`         | `SPOKEN.goodbye`, "Goodbye, and thanks for calling RelayPay.", which code appends to every closing reply (§6.4)                                                                        |
-| `clientMessages`         | `transcript`, `status-update`, `speech-update`, for the page's status line and live caption                                                                                             |
+| `endCallPhrases`         | `END_CALL_PHRASE`, "thanks for calling RelayPay", the tail of `SPOKEN.goodbye`, which code appends to every closing reply (§6.4). A unit test keeps the two in step.                  |
+| `clientMessages`         | `transcript` (the caller's words), `voice-input` (the assistant's exact words, as sent to the voice), `status-update` (the call ending, with its reason), `speech-update`, for the page's status line and call transcript |
 | recording                | off. We keep text records. Recordings of callers are more sensitive data than this needs.                                                                                               |
 | Vapi analysis            | off. We write our own summary (§11) with no extra model.                                                                                                                                |
 
@@ -1339,19 +1355,34 @@ instead of speaking. It is the same product, not a second one:
   button stays, and pressing it shows a plain note that voice isn't
   available yet and typing gets the same help.
 - **A call takes over the conversation area** while it lasts: the orb, "Voice
-  call with RelayPay support", the status and a running timer, the last
-  thing the assistant said, and an End call button docked where the composer
-  was. When it ends: what happens next, and "Back to messages" or "Call
-  again".
+  call with RelayPay support", the status and a running timer, the call
+  transcript, and Mute and End call buttons docked where the composer was.
+  Once the first line appears, the orb, status and timer shrink into a
+  header that stays at the top while the transcript scrolls under it. When
+  it ends: the transcript stays, then what happens next, and "Back to
+  messages" or "Call again".
 - **States**, all strings in one `src/app/copy.ts`:
   - the normal path: idle, asking for the microphone, connecting, listening,
     agent speaking, ending, ended
   - microphone blocked: how to allow it
   - could not connect: a retry button
   - call dropped: what was saved
-- **Live caption:** a single line with the last thing the agent said, for
-  accessibility and noisy rooms. Not a transcript log; the brand says no
-  chat-heavy treatment.
+- **Call transcript**, replacing the single live caption at Akin's request
+  (2026-09-30, §20): both sides, in the same plain styling as the typed
+  conversation, and it does not disappear.
+  - The caller's words build up live from Vapi's partial transcripts, with
+    a dashed outline and a caret until they are final.
+  - The assistant's words are its exact text, from Vapi's `voice-input`
+    message, not Vapi's transcription of its audio, which is lossy ("An AI
+    assistant" for "I'm an AI assistant"). The greeting is `FIRST_MESSAGE`
+    itself.
+  - Speech formatting is undone for the eye: "T X N 9 0 0 1" reads
+    "TXN-9001" and gets the same chip as in a typed conversation.
+  - The call is over when the SDK's `call-end` or Vapi's `status-update`
+    "ended" arrives, whichever is first. After that, the SDK's late
+    `speech-end` and its normal "meeting ended" error are ignored: they put
+    the page back on "Listening" after the goodbye (FAILURES 49). A goodbye
+    or hang-up shows as ended; only a fault reason shows as dropped.
 - **After the call:** `GET /api/calls/[id]/summary` returns only what is safe
   on screen: ticket ref, escalation ref, booked time. No account details. Call
   ids are unguessable. A typed conversation gets the same summary from
@@ -1565,7 +1596,7 @@ the console, but it's normal behaviour, so no alert goes out.
 | A customer closes the tab mid-conversation                                  | A beacon to `/api/chat/end`, else the outbox worker after `TEXT_IDLE_CLOSE_MINUTES`     | None                                                                                                                    | Final status and summary; a follow-up ticket if they left mid-escalation | As for a call                           |
 | Vapi won't connect                                                          | Web SDK error                                                                           | On-screen retry                                                                                                         | None                                        | No                                                            |
 | Anyone but Vapi calls the LLM endpoint                                      | Credential check                                                                        | 401                                                                                                                     | Alert                                       | `auth_failure`                                                |
-| Vapi reports the assistant went quiet                                       | `hang` event                                                                            | None                                                                                                                    | Event                                       | `vapi_hang`                                                   |
+| Vapi reports the assistant went quiet                                       | `hang` event                                                                            | None                                                                                                                    | Event on the call                           | `vapi_hang`, one shared alert, only when `HANG_ALERT_MIN_CALLS` calls went quiet within `HANG_ALERT_WINDOW_MINUTES` |
 | Model claims a booking or ticket that didn't happen                         | Evidence gate                                                                           | Only the code-written sentence is ever spoken                                                                           | Gate result                                 | Counted                                                       |
 
 ---
@@ -1919,6 +1950,12 @@ These go in the one-pager and the reflection, named before a grader finds them.
 | 2026-09-30 | The page uses a public Vapi key of its own, restricted to the live domain, `localhost:3000` and this one assistant, not the account's default public key. | The Vapi account is shared by a whole cohort (about 30 keys); restricting the default key could break other people's apps, and leaving it unrestricted lets anyone spend the balance. | Created through Vapi's `/token` API; the restrictions were read back. |
 | 2026-09-30 | Functions run in `dub1` (Dublin), set in `vercel.json`. | The database is in `eu-west-1`; from `iad1` every query in a turn crossed the Atlantic, and first words took 2.8 to 5.6 s (§4). | Not measured yet: takes effect on the next deploy. |
 | 2026-09-30 | Scripts removed: `phase0-probe`, `phase0-report`, `phase0-simulate-call`, `phase5-live-check`, and their npm commands. | Akin asked for a lean codebase. Their numbers are recorded in the rows above and in FAILURES; the rows citing them are history. | `npm run build` and `npm test` pass without them. |
+| 2026-09-30 | Every streamed piece of a voice reply ends with Vapi's `<flush />` token (§5 step 7). | Vapi's chunker held the filler until the whole answer, so the caller heard nothing for 6 to 7 s (FAILURES 46). | Harness calls on the live site before the change: average turn 6.0 s and 6.9 s by Vapi's metrics. After: not measured, needs a deploy. `cheap-checks.test.ts` checks flush tokens are stripped from echoed history. |
+| 2026-09-30 | The filler plays only when the first tool call starts; `FILLER_AFTER_MS` is removed (§5 step 7, §21). | A goodbye got "let me check that" first, which was not true (FAILURES 48). | `turn-runner.test.ts`: "never says it is checking when nothing is being looked up". |
+| 2026-09-30 | A plain goodbye is answered by a cheap check, without the model (§5 step 4, `QUICK_GOODBYE_MAX_WORDS`). | Through the model it took 3.6 to 5.9 s, behind a filler, in every harness call. | `cheap-checks.test.ts`: goodbyes answered; "bye, but also", a question, the first turn and a caller giving callback details all go to the model. Not measured live. |
+| 2026-09-30 | `endCallPhrases` is "thanks for calling RelayPay" (`END_CALL_PHRASE`), the tail of the goodbye, not the whole sentence (§6.4, §12.1). | Vapi matches its transcription of the audio, which never matched the full sentence (FAILURES 47). | Synced and read back; six harness calls in a row ended with `assistant-said-end-call-phrase`. |
+| 2026-09-30 | The call screen shows a live transcript of both sides that stays after the call, with a Mute button; the single live caption is gone (§13). The assistant's side comes from Vapi's `voice-input` message (added to `clientMessages`, §12.1). | Akin: "We should see transcript of both sides, it should not disappear." | Harness calls through the dev server: both sides shown, exact assistant text and greeting, TXN-9001 as a chip, and the ended state kept after the goodbye (FAILURES 49). `use-voice-call.test.ts` for the display formatting. Checked in Edge at 1366 px only; mute was not exercised in a call. |
+| 2026-09-30 | Vapi's `hang` writes an event on the call, as §15 always said (it had not been written). The `vapi_hang` alert is one shared alert, raised only when `HANG_ALERT_MIN_CALLS` different calls went quiet within `HANG_ALERT_WINDOW_MINUTES`, instead of one alert and one email per call (§11, §15). | Akin was emailed "A voice call went quiet" after every test call and asked for it to be fixed (FAILURES 50). One slow reply is nothing the team can act on; calls going quiet again and again is. | `call-hangs.test.ts`; the insert and the count ran against the real schema in a rolled-back transaction (a call that hung twice counts once). Not yet seen on a live call. |
 
 Record every departure from this document here, in the same piece of work as
 the code change.
@@ -1933,7 +1970,7 @@ replaced with measured values, with the measurement noted.
 | Name                                   | Start value                      | Note                                                        |
 | -------------------------------------- | -------------------------------- | ----------------------------------------------------------- |
 | `TURN_DEADLINE_MS`                     | 14000                            | Under Vapi's 20 s custom-LLM timeout                        |
-| `FILLER_AFTER_MS`                      | 1500                             | Measure in Phase 0                                          |
+| `QUICK_GOODBYE_MAX_WORDS`              | 14                               | A longer goodbye goes to the model: it may carry a request (§5 step 4). `FILLER_AFTER_MS` is gone: the filler plays only when a tool starts (§5 step 7) |
 | `REPAIR_MIN_MS`                        | 5000                             | Time left needed to try a repair                            |
 | `AGENT_MAX_TURNS`                      | 6                                | Per `query()`                                               |
 | `AGENT_REASONING`                      | Haiku `disabled`; Sonnet 5.5 `adaptive`, effort `low` | Measured in Phase 0 (§20); Sonnet's is measured by the benchmark |
@@ -1969,6 +2006,8 @@ replaced with measured values, with the measurement noted.
 | `CAL_TIMEOUT_MS` / `RESEND_TIMEOUT_MS` | 6000 / 5000                      | Inline attempts                                             |
 | `JOB_MAX_ATTEMPTS`                     | 6                                | Then `dead`                                                 |
 | `ALERT_RENOTIFY_MINUTES`               | 30                               |                                                             |
+| `HANG_ALERT_MIN_CALLS`                 | 3                                | Different calls that went quiet before anyone is emailed (§15) |
+| `HANG_ALERT_WINDOW_MINUTES`            | 60                               | The window for `HANG_ALERT_MIN_CALLS`                       |
 | `CALL_MAX_DURATION_S`                  | 480                              |                                                             |
 | `CALL_SILENCE_TIMEOUT_S`               | 30                               | The silence hook's wait before its goodbye line             |
 | `CONSOLE_SESSION_HOURS`                | 12                               |                                                             |

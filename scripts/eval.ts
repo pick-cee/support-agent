@@ -9,7 +9,7 @@ import { FIRST_MESSAGE, TYPED } from "../src/app/copy";
 import { checkBeforeModel } from "../src/agent/cheap-checks";
 import { runAgent } from "../src/agent/run-agent";
 import type { TranscriptLine } from "../src/agent/system-prompt";
-import { beginTurn, finishCheapTurn, finishTurn, recordTurnOnConversation, upsertConversation } from "../src/agent/turn-store";
+import { beginTurn, finishCheapTurn, finishTurn, lastAnswerType, recordTurnOnConversation, upsertConversation } from "../src/agent/turn-store";
 import { runTurn, type TurnOutcome } from "../src/agent/turn-runner";
 import { DEFAULT_AGENT_MODEL, TEXT_TURN_DEADLINE_MS } from "../src/lib/constants";
 import { finishConversation } from "../src/lib/conversation-end";
@@ -99,7 +99,7 @@ async function runScenario(scenario: Scenario, runId: string, model: string, def
   for (const [turnIndex, line] of scenario.turns.entries()) {
     transcript.push({ role: "caller", text: line });
     const state = (await queryDb<{ verified_customer_id: string | null; escalation_id: string | null; clarify_streak: number }>(`select verified_customer_id, escalation_id, clarify_streak from support_agent.conversations where id = $1`, [conversation.id])).rows[0]!;
-    const check = checkBeforeModel({ userText: line, turnIndex, spentTodayUsd: 0 });
+    const check = checkBeforeModel({ userText: line, turnIndex, spentTodayUsd: 0, lastAnswerType: turnIndex > 0 ? await lastAnswerType(conversation.id) : null });
     const userText = check.action === "run" ? check.userText : line;
     const turn = await beginTurn({ conversationId: conversation.id, turnIndex, userText, truncated: check.action === "run" && check.truncated });
     if (check.action === "reply") {

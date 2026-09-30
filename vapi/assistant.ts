@@ -11,6 +11,14 @@ import { CALL_MAX_DURATION_S, CALL_SILENCE_TIMEOUT_S, VAPI_LLM_TIMEOUT_S } from 
 // "RelayPay Support" assistant, which sync leaves untouched.
 export const ASSISTANT_NAME = "Akin's RelayPay Support Agent";
 
+/**
+ * Vapi matches end-call phrases against its transcription of the assistant's
+ * own audio, not the text we sent: "Goodbye, and thanks for calling RelayPay."
+ * came back as "Goodbye. And, uh, thanks for calling RelayPay." and never
+ * matched, so calls did not end (2026-09-30). The tail survives transcription.
+ */
+export const END_CALL_PHRASE = "thanks for calling RelayPay";
+
 // Deepgram key terms, so the names and references callers say survive transcription.
 const KEY_TERMS = ["RelayPay", "LagosLedger", "NairobiOps", "AccraStack", "CapeCloud", "KigaliWorks", "TXN", "payout", "KYC"];
 
@@ -40,11 +48,13 @@ export function assistantConfig(input: { baseUrl: string; llmToken: string; serv
       timeoutSeconds: 20,
     },
     serverMessages: ["status-update", "end-of-call-report", "hang"],
-    // The page's live caption reads the assistant's final transcript.
-    clientMessages: ["transcript", "status-update", "speech-update"],
+    // The page's live transcript: the caller's words from "transcript", the
+    // assistant's exact words from "voice-input" (the text sent to the voice,
+    // not a transcription of the audio).
+    clientMessages: ["transcript", "voice-input", "status-update", "speech-update"],
     maxDurationSeconds: CALL_MAX_DURATION_S,
     // The closing line code appends to every closing reply: saying it ends the call.
-    endCallPhrases: [SPOKEN.goodbye],
+    endCallPhrases: [END_CALL_PHRASE],
     // silenceTimeoutSeconds is a hook in this SDK version (DESIGN §20).
     hooks: [
       {

@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { PAGE } from "../copy";
-import { CloseIcon, EndCallIcon, InfoIcon, MicIcon, PlusIcon } from "../icons";
+import { CloseIcon, EndCallIcon, InfoIcon, MicIcon, MicOffIcon, PlusIcon } from "../icons";
 import styles from "../page.module.css";
 import { CallView } from "./call-view";
 import { Composer, type ComposerHandle } from "./composer";
@@ -86,7 +86,7 @@ export function SupportApp({ publicKey, assistantId }: { publicKey: string; assi
       <main ref={scrollerRef} className={styles.scroller}>
         <div className={styles.column}>
           {call.open ? (
-            <CallView phase={call.phase} caption={call.caption} summary={call.summary} startedAt={call.startedAt} busy={call.busy} orbRef={call.orbRef} />
+            <CallView phase={call.phase} lines={call.lines} summary={call.summary} startedAt={call.startedAt} busy={call.busy} muted={call.muted} orbRef={call.orbRef} />
           ) : !chat.started ? (
             <Welcome onPick={(question) => void chat.send(question)} disabled={chat.pending} />
           ) : (
@@ -113,10 +113,16 @@ export function SupportApp({ publicKey, assistantId }: { publicKey: string; assi
           {call.open ? (
             <div className={styles.callActions}>
               {call.busy ? (
-                <button type="button" className={styles.dangerButton} onClick={() => void call.stop()} disabled={call.phase === "ending" || call.phase === "askingMic"}>
-                  <EndCallIcon size={20} />
-                  {PAGE.voice.endCall}
-                </button>
+                <>
+                  <button type="button" className={styles.secondaryButton} onClick={call.toggleMute} aria-pressed={call.muted} disabled={!call.live}>
+                    {call.muted ? <MicOffIcon size={18} /> : <MicIcon size={18} />}
+                    {call.muted ? PAGE.voice.unmute : PAGE.voice.mute}
+                  </button>
+                  <button type="button" className={styles.dangerButton} onClick={() => void call.stop()} disabled={call.phase === "ending" || call.phase === "askingMic"}>
+                    <EndCallIcon size={20} />
+                    {PAGE.voice.endCall}
+                  </button>
+                </>
               ) : (
                 <>
                   <button type="button" className={styles.secondaryButton} onClick={backToMessages}>

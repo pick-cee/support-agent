@@ -616,3 +616,87 @@ here, never from memory afterwards.
 - **Fix:** the alert was deleted; the check itself was correct. Later checks
   used valid, harmless requests (a status update with no call). Lesson: probe
   a live system only with requests it treats as normal.
+
+### 46. The filler was held until the whole answer, so the caller waited 6 to 7 s
+
+- **When:** 2026-09-30, Akin's first live voice calls ("the latency is
+  crazy").
+- **Symptom:** two harness calls on the live site (a recorded caller as the
+  microphone, Vapi's own turn metrics): average turn 6.0 s and 6.9 s, of
+  which Vapi's voice stage was 3.3 s and 4.4 s, while our first text arrived
+  in about 2.3 s. The caller heard "One moment while I check that" joined to
+  the answer, not before it.
+- **Root cause:** Vapi's chunker waits for enough text and a boundary before
+  it sends text to the voice. The filler was the only text for several
+  seconds, so it sat in the buffer until the answer arrived.
+- **Fix:** every piece we stream ends with Vapi's `<flush />` token
+  (`VAPI_FLUSH`), which sends the buffer to the voice at once. Flush tokens
+  are stripped where Vapi echoes our replies back in the next request, and
+  on the page. Not yet measured live: the route change needs a deploy.
+
+### 47. The call did not end on the goodbye
+
+- **When:** 2026-09-30, the first harness call.
+- **Symptom:** the assistant said "Goodbye, and thanks for calling RelayPay."
+  and the call stayed open until the harness hung up (`endedReason`
+  `customer-ended-call`).
+- **Root cause:** Vapi matches `endCallPhrases` against its transcription of
+  the assistant's audio, not the text we sent. It transcribed the goodbye as
+  "Goodbye. And, uh, thanks for calling RelayPay.", which never matched the
+  whole sentence.
+- **Fix:** the end-call phrase is the tail only, "thanks for calling
+  RelayPay" (`END_CALL_PHRASE`), and a unit test checks the spoken goodbye
+  contains it. Synced to Vapi; the next six calls all ended with
+  `assistant-said-end-call-phrase`.
+
+### 48. The assistant said "let me check that" before saying goodbye
+
+- **When:** 2026-09-30, reported by Akin: "Even when I said bye, it said
+  that and then told me bye a couple seconds later".
+- **Symptom:** a plain goodbye got "One moment while I check that." and then,
+  seconds later, the goodbye (seen in every harness call, for example
+  "1 moment while I check that. Goodbye. And thanks for calling RelayPay.").
+- **Root cause:** the filler had two triggers: the first tool call, and a
+  timer (`FILLER_AFTER_MS`, 1.5 s) for a slow reply with nothing looked up.
+  A goodbye takes the model about 2 s, so the timer fired and the caller was
+  told something was being checked when nothing was.
+- **Fix:** the timer is gone; the filler plays only when a lookup or search
+  actually starts, so it is always true. A plain goodbye no longer goes to
+  the model at all: a cheap check answers it at once (DESIGN §5 step 4), with
+  guards so "bye, but also..." and a caller giving callback details still
+  reach the model. Unit tests for both.
+
+### 49. The page went back to "Listening" after the call ended
+
+- **When:** 2026-09-30, testing the new call transcript.
+- **Symptom:** the assistant said goodbye, Vapi ended the call, and the page
+  showed "Listening" with a live timer and no way to leave.
+- **Root cause:** found with temporary logging of the Web SDK's events on
+  the page. After the call ends it still sends its normal "Meeting ended due
+  to ejection" error, then `call-end`, then a last `speech-end`. The error
+  handler set "could not connect" and `speech-end` set "Listening". In one
+  run `call-end` did not arrive at all.
+- **Fix:** the call is finished by whichever comes first, `call-end` or
+  Vapi's `status-update` "ended", and every later event is ignored. The
+  ended reason decides "ended" versus "dropped". The debug logging was
+  removed. Verified in a harness call's screenshot: the transcript stayed
+  with "Back to messages" and "Call again".
+
+### 50. Every test call emailed the team that the call went quiet
+
+- **When:** 2026-09-30, reported by Akin after the harness calls: "All the
+  test you ran i got the email that the call went quiet, why?"
+- **Symptom:** eight "A voice call went quiet" warning emails in about an
+  hour: one for Akin's own call and one for each of my seven test calls.
+- **Root cause:** two things. First, the calls really did go quiet: Vapi
+  sends a `hang` notice when a caller waits in silence for an answer, and
+  every call's first lookup took 7 to 9 s before any sound (FAILURES 46).
+  Second, the events route raised a `vapi_hang` alert with a fingerprint per
+  call, so each call was a new alert and a new email. The hang was also
+  never recorded on the call, though DESIGN §15 said it should be.
+- **Fix:** each hang is now an event on its call. The alert is one shared
+  alert, raised only when `HANG_ALERT_MIN_CALLS` (3) different calls went
+  quiet within `HANG_ALERT_WINDOW_MINUTES` (60), and emailed at most once
+  per `ALERT_RENOTIFY_MINUTES`. The latency behind the hangs is fixed by the
+  flush (FAILURES 46), which needs a deploy. My seven test calls' alerts,
+  and their email jobs, were deleted; Akin's call and its alert were kept.

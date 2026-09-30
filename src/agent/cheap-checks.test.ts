@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SPOKEN } from "@/app/copy";
 import { DAILY_AGENT_BUDGET_USD, MAX_TURNS_PER_CALL, MAX_USER_CHARS } from "@/lib/constants";
 
+import { END_CALL_PHRASE } from "../../vapi/assistant";
 import { checkBeforeModel } from "./cheap-checks";
 import { channelOf, redactVapiPayload, sseChunk, transcriptOf, vapiRequestSchema } from "./vapi-protocol";
 
@@ -18,6 +19,29 @@ describe("checkBeforeModel", () => {
   it("closes politely at the turn limit and declines past the daily budget", () => {
     expect(checkBeforeModel({ userText: "hello", turnIndex: MAX_TURNS_PER_CALL, spentTodayUsd: 0 })).toMatchObject({ reason: "max_turns" });
     expect(checkBeforeModel({ userText: "hello", turnIndex: 1, spentTodayUsd: DAILY_AGENT_BUDGET_USD })).toMatchObject({ reason: "budget" });
+  });
+
+  it.each([["No, thank you. That's all. Goodbye."], ["Uh, no. Thank you. That will be all."], ["Bye!"], ["That's everything, have a good day"], ["no thanks that is all"]])("says goodbye to %j at once, with the phrase that ends the call", (userText) => {
+    expect(checkBeforeModel({ userText, turnIndex: 2, spentTodayUsd: 0, lastAnswerType: "answer" })).toEqual({ action: "reply", text: `${SPOKEN.quickGoodbye} ${SPOKEN.goodbye}`, reason: "goodbye", answerType: "closing" });
+  });
+
+  it.each([
+    ["That's all, but can you also check TXN-9001?"],
+    ["Thanks, what about payouts?"],
+    ["Thank you"],
+    ["Goodbye? Wait, one more thing"],
+    ["That's all I wanted to ask about fees and I need to know about refunds for my payout from last week please"],
+  ])("sends %j to the agent: it may carry another request", (userText) => {
+    expect(checkBeforeModel({ userText, turnIndex: 2, spentTodayUsd: 0, lastAnswerType: "answer" }).action).toBe("run");
+  });
+
+  it("never says goodbye while callback details are being taken, or on the first turn", () => {
+    expect(checkBeforeModel({ userText: "No, that's all.", turnIndex: 3, spentTodayUsd: 0, lastAnswerType: "collect_details" }).action).toBe("run");
+    expect(checkBeforeModel({ userText: "Goodbye", turnIndex: 0, spentTodayUsd: 0 }).action).toBe("run");
+  });
+
+  it("keeps the end-call phrase inside the goodbye, so saying it always ends the call", () => {
+    expect(SPOKEN.goodbye.toLowerCase()).toContain(END_CALL_PHRASE.toLowerCase());
   });
 
   it("keeps the last characters of an over-long turn and says so", () => {
@@ -45,6 +69,11 @@ describe("the Vapi protocol", () => {
       { role: "caller", text: "Check TXN-9001" },
     ]);
     expect(channelOf(body)).toBe("web");
+  });
+
+  it("drops the flush tokens Vapi echoes back in the assistant's lines", () => {
+    const echoed = vapiRequestSchema.parse({ messages: [{ role: "assistant", content: "One moment while I check that.<flush /> TXN-9001 is processing.<flush />" }], call: { id: "c" } });
+    expect(transcriptOf(echoed)).toEqual([{ role: "agent", text: "One moment while I check that. TXN-9001 is processing." }]);
   });
 
   it("rejects a body without a call id", () => {

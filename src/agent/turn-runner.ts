@@ -1,6 +1,6 @@
 import { FILLER_PHRASES, SPOKEN, VOICE_TO_TYPED } from "@/app/copy";
 import type { AlertInput } from "@/lib/alerts";
-import { FILLER_AFTER_MS, REPAIR_MIN_MS, TURN_DEADLINE_MS } from "@/lib/constants";
+import { REPAIR_MIN_MS, TURN_DEADLINE_MS } from "@/lib/constants";
 
 import type { Answer, AnswerType } from "./answer";
 import { codeSentences } from "./code-sentences";
@@ -32,7 +32,6 @@ export type TurnRequest = {
   /** Voice by default. A typed turn gets no filler, and its reply is formatted for reading. */
   channel?: "voice" | "text";
   deadlineMs?: number;
-  fillerAfterMs?: number;
   repairMinMs?: number;
 };
 
@@ -114,6 +113,9 @@ export async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
     spokeAlready = true;
   };
   // Once per turn, from a fixed list, and it never claims anything (DESIGN §5 step 7).
+  // Only when a lookup or search starts, so it is true: a timer once had the
+  // caller hear "let me check that" before "goodbye" (Akin, 2026-09-30).
+  // A reader sees the page's progress line instead.
   const speakFiller = () => {
     if (fillerUsed || finished) return;
     fillerUsed = true;
@@ -128,8 +130,6 @@ export async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
     deadlineHit = true;
     controller.abort();
   }, deadlineMs);
-  // A reader sees the page's progress line instead of a filler phrase.
-  const fillerTimer = typed ? undefined : setTimeout(speakFiller, request.fillerAfterMs ?? FILLER_AFTER_MS);
 
   const attempt = async (repair?: { previous: string; violations: string[] }): Promise<AgentRun> => {
     try {
@@ -188,7 +188,6 @@ export async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
 
   finished = true;
   clearTimeout(deadline);
-  clearTimeout(fillerTimer);
   request.signal.removeEventListener("abort", onAbort);
 
   const alerts: AlertInput[] = [];

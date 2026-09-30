@@ -18,10 +18,19 @@ export const vapiRequestSchema = z.looseObject({
 
 export type VapiRequest = z.infer<typeof vapiRequestSchema>;
 
+/**
+ * Vapi's control token: send what is buffered to the voice now. Without it,
+ * Vapi's chunker held "One moment while I check that." (exactly its 30
+ * character minimum, nothing after it) until the whole answer arrived, and
+ * the caller heard both together, about 7 s after they stopped (Vapi's own
+ * turn metrics, 2026-09-30).
+ */
+export const VAPI_FLUSH = "<flush />";
+const FLUSH_TOKENS = /<flush\s*\/>/g;
+
 function textOf(content: z.infer<typeof contentSchema>): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) return content.map((part) => part.text ?? "").join(" ");
-  return "";
+  const raw = typeof content === "string" ? content : Array.isArray(content) ? content.map((part) => part.text ?? "").join(" ") : "";
+  return raw.replace(FLUSH_TOKENS, " ").replace(/\s{2,}/g, " ");
 }
 
 /** What the caller said and heard, oldest first. System and tool messages are not part of it. */

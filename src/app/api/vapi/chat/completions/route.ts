@@ -11,13 +11,14 @@ import {
   beginTurn,
   finishCheapTurn,
   finishTurn,
+  lastAnswerType,
   recordSystemEvent,
   recordTurnOnConversation,
   upsertConversation,
   type ConversationRow,
 } from "@/agent/turn-store";
 import { runTurn, type TurnOutcome } from "@/agent/turn-runner";
-import { callerNumberOf, channelOf, redactVapiPayload, SSE_DONE, SSE_HEADERS, sseChunk, transcriptOf, vapiRequestSchema } from "@/agent/vapi-protocol";
+import { callerNumberOf, channelOf, redactVapiPayload, SSE_DONE, SSE_HEADERS, sseChunk, transcriptOf, VAPI_FLUSH, vapiRequestSchema } from "@/agent/vapi-protocol";
 import { raiseAlert } from "@/lib/alerts";
 import { bearerMatches } from "@/lib/auth";
 import { DEFAULT_AGENT_MODEL } from "@/lib/constants";
@@ -89,8 +90,9 @@ export async function POST(request: Request): Promise<Response> {
   let userText: string;
   try {
     conversation = await upsertConversation({ vapiCallId: body.call.id, channel: channelOf(body), callerIdentifier: callerNumberOf(body) });
-    spentToday = await agentSpendTodayUsd();
-    check = checkBeforeModel({ userText: lastCaller?.text ?? "", turnIndex, spentTodayUsd: spentToday });
+    const [spent, previousAnswerType] = await Promise.all([agentSpendTodayUsd(), turnIndex > 0 ? lastAnswerType(conversation.id) : Promise.resolve(null)]);
+    spentToday = spent;
+    check = checkBeforeModel({ userText: lastCaller?.text ?? "", turnIndex, spentTodayUsd: spentToday, lastAnswerType: previousAnswerType });
     userText = check.action === "run" ? check.userText : (lastCaller?.text ?? "");
     turn = await beginTurn({ conversationId: conversation.id, turnIndex, userText, truncated: check.action === "run" && check.truncated });
   } catch (error) {
@@ -149,7 +151,8 @@ export async function POST(request: Request): Promise<Response> {
         model: optionalEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL,
         now: new Date(),
         signal: caller.signal,
-        emit: (text) => send(sseChunk(replyId, text)),
+        // Each piece is spoken the moment it arrives: the filler while the lookup runs, then the answer.
+        emit: (text) => send(sseChunk(replyId, `${text}${VAPI_FLUSH}`)),
         runAgent,
       });
       send(sseChunk(replyId, null, "stop"));

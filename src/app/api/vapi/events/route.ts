@@ -5,6 +5,7 @@ import * as z from "zod";
 
 import { raiseAlert } from "@/lib/alerts";
 import { bearerMatches } from "@/lib/auth";
+import { recordHang } from "@/lib/call-hangs";
 import { finishConversation } from "@/lib/conversation-end";
 import { queryDb } from "@/lib/db";
 import { requireEnv } from "@/lib/env";
@@ -85,7 +86,7 @@ export async function POST(request: Request): Promise<Response> {
   after(async () => {
     try {
       if (event.type === "hang") {
-        await raiseAlert({ type: "vapi_hang", severity: "warning", fingerprint: `vapi_hang:${callId ?? "unknown"}`, message: "Vapi reported that the assistant went quiet on a call.", context: { call_id: callId ?? null } });
+        await recordHang(callId ? await ensureConversation(callId, event.call?.type) : null, callId ?? null);
         return;
       }
       if (!callId) return;

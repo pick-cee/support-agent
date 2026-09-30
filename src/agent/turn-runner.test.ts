@@ -67,7 +67,6 @@ function request(fake: (options: RunAgentOptions) => Promise<AgentRun>, override
       signal: new AbortController().signal,
       emit: (text) => spoken.push(text),
       runAgent: fake,
-      fillerAfterMs: 10_000,
       ...overrides,
     },
   };
@@ -168,20 +167,17 @@ describe("runTurn", () => {
     expect(spoken).toEqual([]);
   });
 
-  it("speaks the filler on time when the agent is slow to start a tool", async () => {
+  it("never says it is checking when nothing is being looked up, however long the reply takes", async () => {
+    // Akin heard "one moment while I check that" before "goodbye" when the filler ran on a timer (2026-09-30).
     const { request: turn, spoken } = request(
-      (options) =>
+      () =>
         new Promise((resolve) => {
-          setTimeout(() => {
-            options.onFirstToolUse?.();
-            resolve(agentRun({ answer: answer({ answer_type: "decline", spoken_text: "I can't answer that from our records." }) }));
-          }, 40);
+          setTimeout(() => resolve(agentRun({ answer: answer({ answer_type: "closing", spoken_text: "You're welcome." }) })), 60);
         }),
-      { fillerAfterMs: 5 },
     );
     await runTurn(turn);
-    expect(spoken[0]).toBe(FILLER_PHRASES[0]);
-    expect(spoken).toHaveLength(2);
+    expect(spoken.join("")).not.toContain(FILLER_PHRASES[0]);
+    expect(spoken.join("").trim()).toBe(`You're welcome. ${SPOKEN.goodbye}`);
   });
 
   it("raises a critical alert when the MCP server did not connect", async () => {
@@ -219,7 +215,7 @@ describe("runTurn", () => {
         options.onFirstToolUse?.();
         return agentRun({ toolCalls: [TXN_9001], answer: answer({ answer_type: "closing", spoken_text: "TXN-9001 is an outgoing payout that is still processing." }) });
       },
-      { channel: "text", fillerAfterMs: 0 },
+      { channel: "text" },
     );
     const outcome = await runTurn(turn);
     expect(outcome.fillerUsed).toBe(false);

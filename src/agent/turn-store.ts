@@ -209,6 +209,17 @@ export async function agentSpendTodayUsd(): Promise<number> {
   return Number(result.rows[0]?.spent ?? 0);
 }
 
+/** The type of the conversation's last reply, so the quick goodbye never cuts off a callback being arranged. */
+export async function lastAnswerType(conversationId: string): Promise<string | null> {
+  const result = await queryDb<{ answer_type: string }>(
+    `select answer_type from support_agent.conversation_turns
+      where conversation_id = $1 and answer_type is not null
+      order by turn_index desc limit 1`,
+    [conversationId],
+  );
+  return result.rows[0]?.answer_type ?? null;
+}
+
 export async function recordSystemEvent(input: { conversationId: string | null; turnId?: string | null; eventType: string; summary: string; metadata?: unknown }): Promise<void> {
   await queryDb(
     `insert into support_agent.conversation_events (conversation_id, turn_id, event_type, summary, metadata, source)

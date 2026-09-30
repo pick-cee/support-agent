@@ -34,8 +34,10 @@ export const SPOKEN = {
   escalatedAlready: "Your case is with a specialist, who will cover this with you.",
   /** Added by code to every inferred answer (DESIGN §8): the agent worked it out, no chunk states it. */
   inferredHedge: "I'm not completely certain about that, so please confirm it in your RelayPay dashboard, or I can arrange for a specialist to check.",
-  /** Appended by code to every closing reply, and listed in the assistant's endCallPhrases, so the call ends on it. */
+  /** Appended by code to every closing reply; its end, "thanks for calling RelayPay", is the assistant's end-call phrase. */
   goodbye: "Goodbye, and thanks for calling RelayPay.",
+  /** Said at once, with the goodbye, when the caller is plainly done (no model). */
+  quickGoodbye: "You're welcome.",
   /** Said by Vapi after CALL_SILENCE_TIMEOUT_S of silence, before it ends the call. */
   silenceGoodbye: "I haven't heard anything for a while, so I'll end the call now. You can call back any time.",
 } as const;
@@ -96,7 +98,10 @@ export const PAGE = {
     retry: "Try again",
     callAgain: "Call again",
     backToChat: "Back to messages",
-    lastSaidLabel: "The assistant said",
+    transcriptLabel: "Your call with RelayPay support",
+    mute: "Mute",
+    unmute: "Unmute",
+    mutedStatus: "You're muted",
     status: {
       idle: "Ready when you are.",
       askingMic: "Allow microphone access to start the call.",
@@ -330,7 +335,7 @@ export const CONSOLE = {
     notification_failed: { title: "An email to the team wasn't sent", meaning: "Make sure someone is set to receive it in Settings." },
     job_dead: { title: "A booking or email gave up", meaning: "It was tried several times and failed. Check the case in Escalations." },
     budget_exceeded: { title: "Daily AI budget reached", meaning: "Customers get a busy message until tomorrow." },
-    vapi_hang: { title: "A voice call went quiet", meaning: "The assistant stopped responding during a call." },
+    vapi_hang: { title: "Voice calls are going quiet", meaning: "Several callers recently waited in silence for an answer, so voice replies are slower than they should be." },
     gate_fallback: { title: "A reply was held back", meaning: "A safety check stopped a reply, and the customer got a standard one instead." },
     rate_limited: { title: "Too many messages from one visitor", meaning: "Someone sent a lot of messages quickly and was asked to wait." },
   } as Record<string, { title: string; meaning: string }>,

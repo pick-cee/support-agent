@@ -13,6 +13,7 @@ import {
   createTextConversation,
   finishCheapTurn,
   finishTurn,
+  lastAnswerType,
   loadTextConversation,
   recordTurnOnConversation,
   textMessagesInWindow,
@@ -85,10 +86,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const reply = (text: string, answerType: string | null) => Response.json({ conversationId: conversation.id, reply: text, answerType } satisfies ChatReply, { headers: NO_STORE });
 
-  // Cheap checks, before any model: the turn cap and the daily budget.
-  const check = checkBeforeModel({ userText: message, turnIndex: turn.turn_index, spentTodayUsd: spentToday });
+  // Cheap checks, before any model: the turn cap, a plain goodbye and the daily budget.
+  const previousAnswerType = turn.turn_index > 0 ? await lastAnswerType(conversation.id).catch(() => null) : null;
+  const check = checkBeforeModel({ userText: message, turnIndex: turn.turn_index, spentTodayUsd: spentToday, lastAnswerType: previousAnswerType });
   if (check.action === "reply") {
-    const text = toText(check.reason === "max_turns" ? TYPED.tooManyTurns : check.reason === "empty" ? TYPED.didNotCatch : check.text, now).text;
+    const typedText = check.reason === "max_turns" ? TYPED.tooManyTurns : check.reason === "empty" ? TYPED.didNotCatch : check.reason === "goodbye" ? `${SPOKEN.quickGoodbye} ${TYPED.goodbye}` : check.text;
+    const text = toText(typedText, now).text;
     await finishCheapTurn(turn.id, { spokenText: text, answerType: check.answerType, reason: check.reason, ttftMs: 0 });
     await recordTurnOnConversation(conversation.id, { turnIndex: turn.turn_index, clarifyStreak: conversation.clarify_streak, costEstimateUsd: 0 });
     if (check.reason === "budget") {

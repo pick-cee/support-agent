@@ -25,8 +25,8 @@ export const AGENT_REASONING: Record<string, { thinking: { type: "disabled" } | 
 
 /** Under Vapi's 20 s custom-LLM first-token timeout. */
 export const TURN_DEADLINE_MS = 14_000;
-/** Measure in Phase 0. */
-export const FILLER_AFTER_MS = 1_500;
+/** A goodbye longer than this goes to the model: it may carry another request. */
+export const QUICK_GOODBYE_MAX_WORDS = 14;
 /** Time left needed to try a repair (Phase 4). */
 export const REPAIR_MIN_MS = 5_000;
 /**
@@ -152,6 +152,9 @@ export const CONSOLE_CHART_MIN_SCALE = 4;
 /** Off Vercel, the server runs the outbox worker itself this often; pg_cron cannot reach localhost. */
 export const OUTBOX_LOCAL_INTERVAL_MS = 60_000;
 export const ALERT_RENOTIFY_MINUTES = 30;
+/** Calls going quiet (Vapi's hang) are emailed only when this many different calls do so within the window. */
+export const HANG_ALERT_MIN_CALLS = 3;
+export const HANG_ALERT_WINDOW_MINUTES = 60;
 
 // --- The support console ------------------------------------------------------------
 export const CONSOLE_SESSION_HOURS = 12;
