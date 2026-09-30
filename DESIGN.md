@@ -217,6 +217,24 @@ cold starts are over 8 seconds, the turn runner moves to a small always-on Node
 service that keeps a pre-warmed spare (`prewarm()` in the SDK), and the rest
 stays on Vercel. We do not move it on a hunch.
 
+**First Vercel numbers (2026-09-30, three turns, not yet ten calls).** Sent to
+the live custom-LLM endpoint exactly as Vapi sends a turn, from Lagos, with the
+functions in `iad1` (Washington) and the database in `eu-west-1` (Ireland):
+
+| Turn | First words (the filler) | Whole reply |
+| --- | --- | --- |
+| TXN-9001 lookup, first call | 5.6 s | 12.9 s |
+| Fees question | 5.1 s | 15.2 s |
+| Fees question again | 2.8 s | 8.3 s |
+
+That is text, before Vapi's speech; time to first audio adds Vapi's text to
+speech, not measured here. On these three the gate's cold limit (8 s) holds and
+the warm limit (3 s) does not, so it is not settled. The functions now run in
+`dub1` (Dublin, `vercel.json`), next to the database: every query in a turn
+had been crossing the Atlantic. That change is not measured yet; the same
+three turns should be repeated after the next deploy, then ten real web calls,
+before the gate is decided.
+
 ---
 
 ## 5. A turn, step by step
@@ -1897,6 +1915,9 @@ These go in the one-pager and the reflection, named before a grader finds them.
 | 2026-09-30 | The console's Conversations and Escalations are inboxes with the item beside the list, and each item reads top to bottom: header, one summary card, then the conversation (§14). | Akin chose the inbox layout; the first version, with a third column of panels, was "cramped, too many things happening", and he asked for it to be calmer. | Screenshots in Edge at 1366 px of a conversation and an escalation. Not checked on a phone-sized screen yet. |
 | 2026-09-30 | Plain language everywhere a person reads (§14): no commands, setting names, tool names, raw record values, scores or ids in the console or the emails. Alerts lead with a title and what it means; the system's message is kept "for your developer". | Akin: "The people interacting with this are not technical." | A search of `copy.ts` for commands, variable names and system terms finds none in shown text. `notices.test.ts` checks the alert email leads with the plain title. |
 | 2026-09-30 | Everything Node-only in the server's start-up code moved to `src/instrumentation-node.ts`, imported under `NEXT_RUNTIME === "nodejs"` (§4, §10.1). | The Edge build followed the outbox's imports into `node:fs` and warned on every compile (FAILURES 44). | `npm run build` and a fresh `next dev`: no Edge warning. |
+| 2026-09-30 | Live on Vercel (`support-agent-gamma-two.vercel.app`): the Vapi assistant was created against it (`79996bf5-a751-480e-865d-1292eeed099a`), and Supabase's `pg_cron` calls its outbox route every minute. | Akin deployed and asked for voice to go live. | Read back from Vapi: the custom model at `/api/vapi` with its credential, the events route with its header. Three turns sent to the live endpoint as Vapi sends them all answered correctly (§4). The first two scheduled outbox runs returned 200. A real web call has not been made yet. |
+| 2026-09-30 | The page uses a public Vapi key of its own, restricted to the live domain, `localhost:3000` and this one assistant, not the account's default public key. | The Vapi account is shared by a whole cohort (about 30 keys); restricting the default key could break other people's apps, and leaving it unrestricted lets anyone spend the balance. | Created through Vapi's `/token` API; the restrictions were read back. |
+| 2026-09-30 | Functions run in `dub1` (Dublin), set in `vercel.json`. | The database is in `eu-west-1`; from `iad1` every query in a turn crossed the Atlantic, and first words took 2.8 to 5.6 s (§4). | Not measured yet: takes effect on the next deploy. |
 | 2026-09-30 | Scripts removed: `phase0-probe`, `phase0-report`, `phase0-simulate-call`, `phase5-live-check`, and their npm commands. | Akin asked for a lean codebase. Their numbers are recorded in the rows above and in FAILURES; the rows citing them are history. | `npm run build` and `npm test` pass without them. |
 
 Record every departure from this document here, in the same piece of work as

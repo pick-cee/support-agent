@@ -600,3 +600,19 @@ here, never from memory afterwards.
   instrumentation chunk contains none of the outbox, email or migration code.
   A fresh `next dev` then started with no Edge warning, and the local outbox
   worker running.
+
+## Going live
+
+### 45. A configuration check emailed the team a false critical alert
+
+- **When:** 2026-09-30, checking the live site's Vapi token before creating
+  the assistant.
+- **Symptom:** a "Voice call data not understood" critical alert, emailed to
+  the notification list at 16:49 UTC.
+- **Root cause:** to tell a wrong token (401) from a right one, I sent the
+  live custom-LLM endpoint a body with no messages. The right token got past
+  authentication, and the unreadable body raised the critical alert the
+  endpoint raises for a misconfigured assistant, exactly as designed.
+- **Fix:** the alert was deleted; the check itself was correct. Later checks
+  used valid, harmless requests (a status update with no call). Lesson: probe
+  a live system only with requests it treats as normal.
