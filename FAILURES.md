@@ -579,3 +579,24 @@ here, never from memory afterwards.
   costs a second search (DESIGN §8), and with a 1.8 to 1.9 s start those
   turns ended at 10.3 to 11.1 s, inside the deadline; with a 7.6 to 10 s
   start they did not. Local numbers; Vercel's are still owed (DESIGN §4).
+
+### 44. The dev server warned that Node modules were loaded in the Edge runtime
+
+- **When:** 2026-09-30, reported by Akin from `npm run dev`, right after the
+  local outbox worker was added.
+- **Symptom:** "A Node.js module is loaded ('node:fs' ...) which is not
+  supported in the Edge Runtime", with the import trace `Edge Instrumentation:
+  template.ts < handoff-email.ts < outbox.ts < outbox-worker.ts <
+  instrumentation.ts`, repeated on every compile.
+- **Root cause:** Next builds `instrumentation.ts` for Edge as well as Node.
+  `register()` returned early when not on Node, which stops the code running
+  on Edge but not the bundler following its imports: the dynamic import in
+  `startLocalOutbox()` pulled the outbox, the email template and `node:fs`
+  into the Edge build.
+- **Fix:** the documented pattern. Everything Node-only moved to
+  `src/instrumentation-node.ts`, imported only inside
+  `if (process.env.NEXT_RUNTIME === "nodejs")`, which the bundler resolves at
+  build time. `npm run build` shows no Edge warning, and the Edge
+  instrumentation chunk contains none of the outbox, email or migration code.
+  A fresh `next dev` then started with no Edge warning, and the local outbox
+  worker running.

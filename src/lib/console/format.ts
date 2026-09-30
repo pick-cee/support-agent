@@ -37,6 +37,16 @@ export function shortDay(isoDate: string): string {
   return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", day: "numeric", month: "short" }).format(new Date(Date.UTC(year, month - 1, day, 12)));
 }
 
+/** For an inbox row: "14:31" today in Lagos, "29 Sept" before that. */
+export function listTime(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso.includes("T") || iso.includes("+") ? iso : `${iso}Z`);
+  if (Number.isNaN(date.getTime())) return iso;
+  const day = (value: Date) => new Intl.DateTimeFormat("en-GB", { timeZone: BUSINESS_TIMEZONE, day: "numeric", month: "short", year: "numeric" }).format(value);
+  return day(date) === day(now)
+    ? new Intl.DateTimeFormat("en-GB", { timeZone: BUSINESS_TIMEZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date)
+    : new Intl.DateTimeFormat("en-GB", { timeZone: BUSINESS_TIMEZONE, day: "numeric", month: "short" }).format(date);
+}
+
 export function ms(value: number | null): string {
   return value === null ? "no data" : value >= 1000 ? `${(value / 1000).toFixed(1)} s` : `${value} ms`;
 }

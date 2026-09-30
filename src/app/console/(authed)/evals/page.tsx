@@ -4,7 +4,7 @@ import { ms, usd, when } from "@/lib/console/format";
 import { evalMatrix, evalRuns } from "@/lib/console/queries";
 
 import styles from "../../console.module.css";
-import { Badge, Card, Empty, PageHeader } from "../../parts";
+import { Badge, Card, Empty, modelLabel, PageHeader } from "../../parts";
 
 export default async function Evals() {
   const [runs, matrix] = await Promise.all([evalRuns(), evalMatrix()]);
@@ -30,14 +30,13 @@ export default async function Evals() {
                   <tbody>
                     {matrix.map((row) => (
                       <tr key={`${row.scenario_key}-${row.model}`}>
-                        <td className={styles.nowrap}>
-                          <span className={styles.cellStrong}>{row.scenario_key}</span>
+                        <td>
+                          <span className={styles.cellStrong}>{row.test_case}</span>
                         </td>
-                        <td>{row.test_case}</td>
-                        <td className={styles.nowrap}>{row.model}</td>
+                        <td className={styles.nowrap}>{modelLabel(row.model)}</td>
                         <td>
                           <Badge tone={row.passes === row.runs ? "good" : row.passes === 0 ? "bad" : "warn"} dot>
-                            {row.passes} / {row.runs}
+                            {e.passedOf(row.passes, row.runs)}
                           </Badge>
                         </td>
                       </tr>
@@ -62,13 +61,13 @@ export default async function Evals() {
                     <tr key={run.id}>
                       <td className={styles.nowrap}>{when(run.created_at)}</td>
                       <td>{run.label ?? ""}</td>
-                      <td className={styles.nowrap}>{run.model}</td>
+                      <td className={styles.nowrap}>{modelLabel(run.model)}</td>
                       <td className={styles.nowrap}>
                         {run.total === null ? (
                           <Badge>{run.stopped ? e.stopped : e.running}</Badge>
                         ) : (
                           <Badge tone={run.passed === run.total ? "good" : "warn"} dot>
-                            {run.passed} / {run.total}
+                            {e.passedOf(run.passed ?? 0, run.total)}
                           </Badge>
                         )}
                       </td>

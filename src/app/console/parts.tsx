@@ -16,6 +16,16 @@ export function Badge({ children, tone = "neutral", dot = false }: { children: R
   );
 }
 
+/** A quieter status than a pill: a coloured dot and the words, for dense lists. */
+export function StatusText({ children, tone = "neutral" }: { children: React.ReactNode; tone?: Tone }) {
+  return (
+    <span className={styles.statusText} data-tone={tone}>
+      <span className={styles.statusDot} aria-hidden="true" />
+      {children}
+    </span>
+  );
+}
+
 export function PageHeader({ eyebrow, title, intro, children }: { eyebrow?: string; title: string; intro?: string; children?: React.ReactNode }) {
   return (
     <div className={styles.pageHeader}>
@@ -98,4 +108,28 @@ export function statusTone(value: string): Tone {
 /** Status words from the records, made readable: "skipped_eval" becomes "skipped eval". */
 export function words(value: string): string {
   return value.replace(/_/g, " ");
+}
+
+/** A booking or email state in words ("skipped_eval" is "Skipped (test)"), never the raw value. */
+export function stateLabel(value: string): string {
+  return CONSOLE.states[value] ?? sentence(words(value));
+}
+
+/** How a conversation ended, in words; an unfamiliar reason from the voice service is made readable. */
+export function endingLabel(reason: string): string {
+  return CONSOLE.conversation.endings[reason] ?? sentence(reason.replace(/[-_]/g, " "));
+}
+
+/** An AI model by its product name. */
+export function modelLabel(model: string): string {
+  return CONSOLE.models[model] ?? model;
+}
+
+/** An alert in words for the team: its title, and what it means for customers. */
+export function alertInWords(type: string): { title: string; meaning: string } {
+  return CONSOLE.alertTypes[type] ?? { title: sentence(words(type)), meaning: "" };
+}
+
+function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

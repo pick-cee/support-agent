@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { CONSOLE } from "@/app/copy";
@@ -42,6 +43,7 @@ export function StatusSelect({ id, reference, initial }: { id: string; reference
   const [status, setStatus] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [toast, show] = useToast();
+  const router = useRouter();
   const change = async (next: string) => {
     const previous = status;
     setStatus(next);
@@ -51,6 +53,8 @@ export function StatusSelect({ id, reference, initial }: { id: string; reference
       const body = (await response.json().catch(() => ({}))) as { ok?: boolean };
       if (!response.ok || body.ok === false) throw new Error("not saved");
       show(`${reference}: ${CONSOLE.escalations.saved}`);
+      // The queue's badge and the status history are server-rendered; they catch up here.
+      router.refresh();
     } catch {
       setStatus(previous);
       show(CONSOLE.escalations.saveFailed, "bad");

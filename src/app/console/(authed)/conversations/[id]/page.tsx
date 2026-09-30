@@ -1,236 +1,101 @@
-import Image from "next/image";
 import Link from "next/link";
 
-import { CONSOLE, PAGE } from "@/app/copy";
+import { CONSOLE } from "@/app/copy";
 import { ArrowRightIcon, ChatIcon } from "@/app/icons";
 import { ms, usd, when } from "@/lib/console/format";
 import { conversationDetail } from "@/lib/console/queries";
 
 import styles from "../../../console.module.css";
-import { Avatar, Badge, Card, channelLabel, Empty, outcomeLabel, outcomeTone, statusTone, words } from "../../../parts";
+import { describeTools } from "../../../describe";
+import { channelLabel, endingLabel, outcomeLabel, outcomeTone, StatusText } from "../../../parts";
+import { Transcript } from "../../../transcript";
+import { ConversationInbox, InboxPlaceholder, queryString, readQuery } from "../inbox";
 
-// A transcript of turns (DESIGN §14): what the customer said, what the
-// assistant said, with the tool calls, knowledge searched and checks folded
-// under each reply. A reply the checks stopped is shown too, marked never sent.
-export default async function ConversationDetail({ params }: { params: Promise<{ id: string }> }) {
-  const detail = await conversationDetail((await params).id);
+function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor((sorted.length - 1) / 2)]!;
+}
+
+// One conversation beside the list (DESIGN §14): a short summary first, then
+// the conversation itself, read top to bottom.
+export default async function ConversationDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ channel?: string; q?: string }> }) {
+  const [{ id }, query] = await Promise.all([params, searchParams.then(readQuery)]);
+  const detail = await conversationDetail(id);
   const c = CONSOLE.conversation;
+
   if (!detail) {
     return (
-      <>
-        <Link href="/console/conversations" className={styles.back}>
-          <ArrowRightIcon size={14} /> {c.back}
-        </Link>
-        <Empty icon={<ChatIcon size={20} />}>{c.notFound}</Empty>
-      </>
+      <ConversationInbox query={query} activeId={id}>
+        <InboxPlaceholder icon={<ChatIcon size={22} />} title={c.notFound} text={CONSOLE.conversations.select} />
+      </ConversationInbox>
     );
   }
-  const { conversation, turns, events, tickets, escalations } = detail;
-  const m = c.meta;
+
+  const { conversation, turns, tickets, escalations } = detail;
+  const actions = describeTools(turns.flatMap((turn) => turn.tools));
+  const firstReply = median(turns.map((turn) => turn.ttft_ms).filter((value): value is number => value !== null));
+  const facts = [
+    { label: c.customer, value: conversation.verified_customer_id ? c.verifiedAs(conversation.verified_customer_id) : c.notVerified },
+    { label: c.replies, value: String(conversation.turn_count) },
+    { label: c.firstReply, value: ms(firstReply) },
+    { label: c.agentSpend, value: usd(conversation.agent_cost_estimate_usd) },
+    ...(conversation.vapi_cost_usd ? [{ label: c.vapiCost, value: usd(conversation.vapi_cost_usd) }] : []),
+    ...(conversation.ended_reason ? [{ label: c.endedBy, value: endingLabel(conversation.ended_reason) }] : []),
+  ];
+
   return (
-    <>
-      <Link href="/console/conversations" className={styles.back}>
-        <ArrowRightIcon size={14} /> {c.back}
-      </Link>
-      <div className={styles.pageHeader}>
-        <div>
-          <p className={styles.eyebrow}>{channelLabel(conversation.channel)}</p>
-          <h1 className={styles.heading}>{when(conversation.created_at)}</h1>
-        </div>
-        <Badge tone={outcomeTone(conversation.final_status)} dot>
-          {outcomeLabel(conversation.final_status)}
-        </Badge>
-      </div>
+    <ConversationInbox query={query} activeId={conversation.id}>
+      <article className={styles.detail}>
+        <Link href={`/console/conversations${queryString(query)}`} className={styles.detailBack}>
+          <ArrowRightIcon size={14} /> {c.back}
+        </Link>
 
-      <Card>
-        {conversation.summary && <p className={styles.summaryText}>{conversation.summary}</p>}
-        <dl className={styles.facts}>
-          <div>
-            <dt>{m.turns}</dt>
-            <dd>{conversation.turn_count}</dd>
-          </div>
-          <div>
-            <dt>{m.verified}</dt>
-            <dd>{conversation.verified_customer_id ?? m.notVerified}</dd>
-          </div>
-          <div>
-            <dt>{m.agentSpend}</dt>
-            <dd>{usd(conversation.agent_cost_estimate_usd)}</dd>
-          </div>
-          <div>
-            <dt>{m.vapiCost}</dt>
-            <dd>{conversation.vapi_cost_usd ? usd(conversation.vapi_cost_usd) : m.notReported}</dd>
-          </div>
-          <div>
-            <dt>{m.ended}</dt>
-            <dd>{conversation.ended_reason ? words(conversation.ended_reason) : m.notReported}</dd>
-          </div>
-        </dl>
-      </Card>
+        <header className={styles.detailHeader}>
+          <p className={styles.detailEyebrow}>
+            {channelLabel(conversation.channel)} · {when(conversation.created_at)}
+          </p>
+          <h2 className={styles.detailTitle}>{turns[0]?.user_text || CONSOLE.conversations.silent}</h2>
+        </header>
 
-      {(escalations.length > 0 || tickets.length > 0) && (
-        <div className={styles.twoColumn}>
-          {escalations.length > 0 && (
-            <Card title={c.escalations}>
-              <ul className={styles.cases}>
-                {escalations.map((item) => (
-                  <li key={item.escalation_ref} className={styles.case}>
-                    <p className={styles.caseHead}>
-                      {item.escalation_ref}
-                      <Badge tone={statusTone(item.status)} dot>
-                        {CONSOLE.escalations.statuses[item.status] ?? item.status}
-                      </Badge>
-                      <Badge>{words(item.category)}</Badge>
-                    </p>
-                    {c.escalationLine(item.reason, words(item.booking_status), item.appointment_time ? when(item.appointment_time) : null, words(item.notification_status))}
+        <section className={styles.summaryCard} aria-label={c.whatHappened}>
+          <div className={styles.summaryTop}>
+            <StatusText tone={outcomeTone(conversation.final_status)}>{outcomeLabel(conversation.final_status)}</StatusText>
+            {actions.length > 0 && (
+              <ol className={styles.flow}>
+                {actions.map((action, index) => (
+                  <li key={index} data-tone={action.tone}>
+                    {action.label}
+                    {action.count > 1 ? ` (${action.count})` : ""}
+                    {action.reference && <span className={styles.ref}>{action.reference}</span>}
                   </li>
                 ))}
-              </ul>
-            </Card>
-          )}
-          {tickets.length > 0 && (
-            <Card title={c.tickets}>
-              <ul className={styles.cases}>
-                {tickets.map((item) => (
-                  <li key={item.ticket_ref} className={styles.case}>
-                    <p className={styles.caseHead}>
-                      {item.ticket_ref}
-                      <Badge tone={statusTone(item.status)} dot>
-                        {item.status}
-                      </Badge>
-                      <Badge>{words(item.category)}</Badge>
-                      <Badge tone={item.priority === "urgent" || item.priority === "high" ? "warn" : "neutral"}>{item.priority}</Badge>
-                    </p>
-                    {item.summary}
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
-        </div>
-      )}
-
-      <section>
-        <h2 className={styles.sectionHeading}>{c.turns}</h2>
-        <div className={styles.timeline}>
-          {turns.map((turn) => {
-            const failed = turn.gate_results.filter((gate) => !gate.passed);
-            const cleaned = turn.gate_results.filter((gate) => gate.cleanup);
-            const hasDetails = turn.tools.length > 0 || turn.retrievals.length > 0 || failed.length > 0 || cleaned.length > 0;
-            return (
-              <article key={turn.id} className={styles.turn} aria-label={c.turnLabel(turn.turn_index + 1)}>
-                <div className={styles.turnHead}>
-                  <span className={styles.turnTitle}>{c.turnLabel(turn.turn_index + 1)}</span>
-                  {turn.answer_type && <Badge tone="brand">{words(turn.answer_type)}</Badge>}
-                  {turn.grounding === "inferred" && <Badge tone="info">{c.inferred}</Badge>}
-                  {turn.reply_source && turn.reply_source !== "agent" && <Badge tone={turn.reply_source === "fallback" ? "bad" : "neutral"}>{words(turn.reply_source)}</Badge>}
-                  {turn.repaired && <Badge tone="warn">{c.repaired}</Badge>}
-                  {turn.status !== "ok" && <Badge tone="bad">{turn.status}</Badge>}
-                  <span className={styles.turnTimes}>
-                    {c.firstText} {ms(turn.ttft_ms)} · {c.final} {ms(turn.total_ms)}
-                    {turn.cost_estimate_usd ? ` · ${usd(turn.cost_estimate_usd)} ${c.estimate}` : ""}
-                  </span>
-                </div>
-                <div className={styles.turnBody}>
-                  <div className={styles.said} data-role="customer">
-                    <Avatar name={c.caller} tone="muted" />
-                    <div className={styles.saidText}>
-                      <span className={styles.saidLabel}>{c.caller}</span>
-                      <p className={styles.saidWords}>{turn.user_text || c.silence}</p>
-                    </div>
-                  </div>
-                  <div className={styles.said} data-role="assistant">
-                    <span className={styles.avatar} data-tone="accent" aria-hidden="true">
-                      <Image src="/icon.png" alt={PAGE.logoAlt} width={20} height={20} />
-                    </span>
-                    <div className={styles.saidText}>
-                      <span className={styles.saidLabel}>{c.agent}</span>
-                      <p className={styles.saidWords}>{turn.spoken_text}</p>
-                      {turn.confidence_note && <p className={styles.confidence}>{turn.confidence_note}</p>}
-                      {turn.status !== "ok" && turn.error && <p className={styles.confidence}>{turn.error}</p>}
-                    </div>
-                  </div>
-
-                  {hasDetails && (
-                    <details className={styles.details} open={failed.length > 0}>
-                      <summary>{c.behind}</summary>
-                      <div className={styles.detailGrid}>
-                        {turn.tools.length > 0 && (
-                          <div>
-                            <p className={styles.detailLabel}>{c.tools}</p>
-                            <ul className={styles.detailList}>
-                              {turn.tools.map((tool, index) => (
-                                <li key={index}>
-                                  <strong>{tool.tool_name}</strong>{" "}
-                                  <Badge tone={tool.status === "ok" ? "good" : tool.status === "error" ? "bad" : "warn"}>{words(tool.status)}</Badge> {tool.result_summary}{" "}
-                                  <span className={styles.muted}>({tool.duration_ms} ms)</span>
-                                  {tool.error_message ? `: ${tool.error_message}` : ""}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {turn.retrievals.length > 0 && (
-                          <div>
-                            <p className={styles.detailLabel}>{c.retrieval}</p>
-                            <ul className={styles.detailList}>
-                              {turn.retrievals.map((retrieval, index) => (
-                                <li key={index}>
-                                  &quot;{retrieval.query}&quot;{" "}
-                                  <Badge tone={retrieval.found ? "good" : retrieval.source_titles.length ? "info" : "warn"}>
-                                    {retrieval.found ? c.found : retrieval.source_titles.length ? c.related : c.notFoundResult}
-                                  </Badge>
-                                  {retrieval.top_score !== null ? c.topScore(retrieval.top_score.toFixed(3)) : ""}
-                                  {retrieval.degraded ? c.fullTextOnly : ""}
-                                  {retrieval.chunk_ids_used.length ? c.cited(retrieval.chunk_ids_used.join(", ")) : c.citedNone}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {(failed.length > 0 || cleaned.length > 0) && (
-                          <div>
-                            <p className={styles.detailLabel}>{c.gates}</p>
-                            <ul className={styles.detailList}>
-                              {failed.map((gate, index) => (
-                                <li key={`f${index}`}>
-                                  <Badge tone="bad">{words(gate.gate)}</Badge> {gate.detail}
-                                  {gate.rejected && (
-                                    <p className={styles.rejected}>
-                                      <strong>{c.stopped}:</strong> {gate.rejected}
-                                    </p>
-                                  )}
-                                </li>
-                              ))}
-                              {cleaned.map((gate, index) => (
-                                <li key={`c${index}`}>
-                                  <Badge tone="info">{words(gate.gate)}</Badge> {gate.detail}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    </details>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      {events.length > 0 && (
-        <Card title={c.events}>
-          <ul className={styles.detailList}>
-            {events.map((event, index) => (
-              <li key={index}>
-                <span className={styles.muted}>{when(event.created_at)}</span> · {event.source} · <strong>{words(event.event_type)}</strong>: {event.summary}
-              </li>
+              </ol>
+            )}
+          </div>
+          <dl className={styles.summaryFacts}>
+            {facts.map((fact) => (
+              <div key={fact.label}>
+                <dt>{fact.label}</dt>
+                <dd>{fact.value}</dd>
+              </div>
             ))}
-          </ul>
-        </Card>
-      )}
-    </>
+          </dl>
+          {escalations.map((item) => (
+            <Link key={item.id} href={`/console/escalations/${item.id}`} className={styles.summaryLink}>
+              {c.openEscalation} <span className={styles.ref}>{item.escalation_ref}</span> <ArrowRightIcon size={14} />
+            </Link>
+          ))}
+          {tickets.map((item) => (
+            <p key={item.ticket_ref} className={styles.summaryNote}>
+              <span className={styles.ref}>{item.ticket_ref}</span> {item.summary}
+            </p>
+          ))}
+        </section>
+
+        <h3 className={styles.transcriptHeading}>{c.turns}</h3>
+        <Transcript turns={turns} />
+      </article>
+    </ConversationInbox>
   );
 }

@@ -2,39 +2,55 @@ import Link from "next/link";
 
 import { CONSOLE } from "@/app/copy";
 import { ArrowRightIcon, BellIcon, ChatIcon, CheckCircleIcon, ClockIcon, FlagIcon, KeyboardIcon, PhoneIcon } from "@/app/icons";
+import { CONSOLE_CHART_MIN_SCALE } from "@/lib/constants";
 import { age, lagosDayPart, ms, shortDay, usd, whenWithZone } from "@/lib/console/format";
 import { dailyActivity, escalationsQueue, knowledgeCounts, recentConversations, todayStats, type DayActivity } from "@/lib/console/queries";
 import { coverage } from "@/lib/notifications";
 
 import styles from "../console.module.css";
-import { Avatar, Badge, Card, channelLabel, Empty, outcomeLabel, outcomeTone, PageHeader, statusTone, words } from "../parts";
+import { Avatar, Card, channelLabel, Empty, outcomeLabel, outcomeTone, PageHeader, StatusText, statusTone, words } from "../parts";
 
 const SEGMENTS: (keyof Omit<DayActivity, "day">)[] = ["resolved", "ticket_created", "escalated", "other"];
 const LEGEND: Record<(typeof SEGMENTS)[number], string> = { resolved: CONSOLE.outcomes.resolved!, ticket_created: CONSOLE.outcomes.ticket_created!, escalated: CONSOLE.outcomes.escalated!, other: CONSOLE.outcomes.open! };
 const SWATCH: Record<(typeof SEGMENTS)[number], string> = { resolved: "var(--brand-primary)", ticket_created: "var(--brand-accent)", escalated: "#d9a441", other: "var(--border-strong)" };
 
+// The scale starts at a few conversations, so one conversation is a short bar
+// on a quiet day, not a full-height block that looks like a spike.
+function scaleTop(max: number): number {
+  if (max <= CONSOLE_CHART_MIN_SCALE) return CONSOLE_CHART_MIN_SCALE;
+  const step = max <= 20 ? 2 : max <= 50 ? 10 : 20;
+  return Math.ceil(max / step) * step;
+}
+
 function ActivityChart({ days }: { days: DayActivity[] }) {
   const totals = days.map((day) => SEGMENTS.reduce((sum, key) => sum + day[key], 0));
-  const max = Math.max(1, ...totals);
   if (totals.every((total) => total === 0)) return <Empty icon={<ChatIcon size={20} />}>{CONSOLE.today.activity.empty}</Empty>;
+  const top = scaleTop(Math.max(...totals));
   return (
     <>
-      <div className={styles.chart} role="img" aria-label={days.map((day, index) => `${shortDay(day.day)}: ${totals[index]}`).join(", ")}>
-        {days.map((day, index) => (
-          <div key={day.day} style={{ height: "100%", display: "flex", alignItems: "flex-end" }}>
-            {totals[index] ? (
-              <div className={styles.bar} style={{ height: `${(totals[index]! / max) * 100}%`, width: "100%", animationDelay: `${index * 30}ms` }} title={`${shortDay(day.day)}: ${totals[index]}`}>
-                {SEGMENTS.map((key) => (day[key] ? <span key={key} className={styles.barSegment} data-kind={key} style={{ flexGrow: day[key] }} /> : null))}
-              </div>
-            ) : (
-              <div className={styles.barEmpty} style={{ width: "100%" }} />
-            )}
-          </div>
-        ))}
+      <div className={styles.chartFrame}>
+        <div className={styles.chartGrid} aria-hidden="true">
+          {[top, top / 2, 0].map((value) => (
+            <span key={value} className={styles.chartLine}>
+              <span className={styles.chartTick}>{Number.isInteger(value) ? value : value.toFixed(1)}</span>
+            </span>
+          ))}
+        </div>
+        <div className={styles.chart} role="img" aria-label={days.map((day, index) => `${shortDay(day.day)}: ${totals[index]}`).join(", ")}>
+          {days.map((day, index) => (
+            <div key={day.day} className={styles.barSlot}>
+              {totals[index] ? (
+                <div className={styles.bar} style={{ height: `${(totals[index]! / top) * 100}%`, animationDelay: `${index * 30}ms` }} title={`${shortDay(day.day)}: ${totals[index]}`}>
+                  {SEGMENTS.map((key) => (day[key] ? <span key={key} className={styles.barSegment} data-kind={key} style={{ flexGrow: day[key] }} /> : null))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
       </div>
       <div className={styles.chartDays} aria-hidden="true">
         {days.map((day, index) => (
-          <span key={day.day}>{index % 2 === 0 || index === days.length - 1 ? shortDay(day.day) : ""}</span>
+          <span key={day.day}>{index % 2 === 1 || index === days.length - 1 ? shortDay(day.day) : ""}</span>
         ))}
       </div>
       <ul className={styles.legend}>
@@ -66,24 +82,33 @@ export default async function Today() {
       <PageHeader eyebrow={CONSOLE.greeting(lagosDayPart())} title={t.heading} intro={t.intro} />
 
       {setup.some((item) => !item.done) && (
-        <Card title={t.setup.heading} intro={t.setup.intro} className={styles.setup}>
+        <section className={styles.setup} aria-labelledby="setup-heading">
+          <div className={styles.setupHead}>
+            <h2 id="setup-heading" className={styles.cardTitle}>
+              {t.setup.heading}
+            </h2>
+            <span className={styles.setupProgress}>{t.setup.progress(setup.filter((item) => item.done).length, setup.length)}</span>
+          </div>
+          <div className={styles.meter} aria-hidden="true">
+            <div className={styles.meterFill} style={{ width: `${(setup.filter((item) => item.done).length / setup.length) * 100}%` }} />
+          </div>
           <ul className={styles.setupList}>
             {setup.map((item) => (
               <li key={item.key} className={styles.setupItem} data-done={item.done ? "true" : "false"}>
-                <CheckCircleIcon size={20} className={styles.setupMark} />
-                <div>
+                <CheckCircleIcon size={18} className={styles.setupMark} />
+                <div className={styles.setupText}>
                   <p className={styles.setupTitle}>{item.copy.title}</p>
-                  <p className={styles.setupBody}>{item.done ? t.setup.done : item.copy.body}</p>
-                  {!item.done && item.href && (
-                    <Link href={item.href} className={styles.setupAction}>
-                      {item.copy.action}
-                    </Link>
-                  )}
+                  {!item.done && <p className={styles.setupBody}>{item.copy.body}</p>}
                 </div>
+                {!item.done && item.href && "action" in item.copy && (
+                  <Link href={item.href} className={styles.setupAction}>
+                    {item.copy.action} <ArrowRightIcon size={14} />
+                  </Link>
+                )}
               </li>
             ))}
           </ul>
-        </Card>
+        </section>
       )}
 
       <div className={styles.stats}>
@@ -155,19 +180,19 @@ export default async function Today() {
             <ul className={styles.list}>
               {open.slice(0, 5).map((row) => (
                 <li key={row.id}>
-                  <Link href={row.conversation_id ? `/console/conversations/${row.conversation_id}` : "/console/escalations"} className={styles.listItem}>
+                  <Link href={`/console/escalations/${row.id}`} className={styles.listItem}>
                     <Avatar name={row.user_name} tone="accent" />
                     <div className={styles.listBody}>
                       <p className={styles.listTitle}>
                         {row.user_name}
                         {row.company_name && <span className={styles.muted}>{row.company_name}</span>}
-                        <Badge tone={statusTone(row.status)} dot>
-                          {CONSOLE.escalations.statuses[row.status] ?? row.status}
-                        </Badge>
                       </p>
                       <p className={styles.listText}>{row.reason}</p>
-                      <p className={styles.statNote}>
-                        <CalendarLine when={row.appointment_time ? whenWithZone(row.appointment_time, row.timezone) : null} /> {row.escalation_ref} · {words(row.category)}
+                      <p className={styles.listSub}>
+                        <StatusText tone={statusTone(row.status)}>{CONSOLE.escalations.statuses[row.status] ?? row.status}</StatusText>
+                        <span>
+                          <CalendarLine when={row.appointment_time ? whenWithZone(row.appointment_time, row.timezone) : null} /> {words(row.category)}
+                        </span>
                       </p>
                     </div>
                     <span className={styles.listMeta}>{CONSOLE.escalations.age(age(row.created_at))}</span>
@@ -198,12 +223,12 @@ export default async function Today() {
                     </span>
                     <div className={styles.listBody}>
                       <p className={styles.listTitle}>
-                        {channelLabel(row.channel)}
-                        <Badge tone={outcomeTone(row.final_status)} dot>
-                          {outcomeLabel(row.final_status)}
-                        </Badge>
+                        <span className={styles.listTitleText}>{row.first_words || CONSOLE.conversations.silent}</span>
                       </p>
-                      <p className={styles.listText}>{row.first_words ? `"${row.first_words}"` : (row.summary ?? "")}</p>
+                      <p className={styles.listSub}>
+                        <StatusText tone={outcomeTone(row.final_status)}>{outcomeLabel(row.final_status)}</StatusText>
+                        <span>{channelLabel(row.channel)}</span>
+                      </p>
                     </div>
                     <span className={styles.listMeta}>{CONSOLE.escalations.age(age(row.created_at))}</span>
                   </Link>

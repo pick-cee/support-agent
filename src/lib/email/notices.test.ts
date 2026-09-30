@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EMAIL } from "@/app/copy";
+import { CONSOLE, EMAIL } from "@/app/copy";
 
 import { buildAlertEmail, buildTestEmail } from "./notices";
 
@@ -15,9 +15,18 @@ const alert = {
 };
 
 describe("alert and test emails", () => {
+  it("leads with the alert in plain words, and keeps the system's own message for a developer", () => {
+    const email = buildAlertEmail(alert, { consoleUrl: null, manageUrl: null });
+    const plain = CONSOLE.alertTypes.booking_failed!;
+    expect(email.subject).toBe(EMAIL.alert.subject("critical", plain.title));
+    expect(email.subject).not.toMatch(/booking_failed/);
+    expect(email.text).toContain(plain.meaning);
+    expect(email.text).toContain(EMAIL.alert.labels.details.toUpperCase());
+    expect(email.text).toContain("Cal.com refused the booking for E-2001.");
+  });
+
   it("renders an alert with its facts in Lagos time, the logo and a link to the console", () => {
     const email = buildAlertEmail(alert, { consoleUrl: "https://example.test/console/alerts", manageUrl: "https://example.test/console/settings" });
-    expect(email.subject).toBe(EMAIL.alert.subject("critical", "booking_failed"));
     expect(email.text).toContain("30 Sept, 09:05 Lagos time");
     expect(email.text).toContain("Escalation ref");
     // Empty context values are left out rather than shown blank.

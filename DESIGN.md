@@ -191,7 +191,8 @@ POST /api/chat               typed messages, the same turn runner
 npm run eval                 scenarios through the same turn runner, text mode
 ```
 
-**Migrations run on start.** `src/instrumentation.ts` runs any pending
+**Migrations run on start.** `src/instrumentation.ts` (its Node-only half in
+`src/instrumentation-node.ts`, so the Edge build never bundles it) runs any pending
 migration when the server starts (`next dev`, `next start`, or a Vercel cold
 start), through `runMigrations()` in `src/lib/migrations.ts`, the same code
 `npm run db:migrate` uses. When everything is applied it is one query and
@@ -1003,7 +1004,7 @@ Whatever fails stays `pending`:
   called every minute by Supabase `pg_cron` and `pg_net`.
 - Off Vercel (`next dev`, `next start` on a server), pg_cron cannot reach the
   app, so the server runs the same worker itself every
-  `OUTBOX_LOCAL_INTERVAL_MS`, started from `src/instrumentation.ts`
+  `OUTBOX_LOCAL_INTERVAL_MS`, started from `src/instrumentation-node.ts`
   (`runOutbox()` in `src/lib/outbox-worker.ts`, shared with the route). It
   retries jobs, sends alert emails and closes idle typed conversations on
   localhost exactly as pg_cron does once deployed. Jobs are claimed with
@@ -1263,14 +1264,20 @@ Route `/`. It follows the brand direction Google Doc exactly.
   monospace, no decorative fonts.
 - **Never:** gradients, emoji, chat bubbles, experimental layouts,
   over-branding. Icons are plain inline line drawings, always beside words.
-- **Layout:** two columns on a wide screen, one on a phone.
-  - left: "How can we help today?", one lead sentence, and three short
-    points (approved answers, payment checks, a specialist when needed)
-  - right: the help card, with two tabs, "Voice call" and "Type a message"
-  - on a phone, the help card comes straight after the heading
-- **Disclosure** in the card, under both tabs: "You're talking to an AI
-  assistant. Conversations are logged for quality and follow-up." The footer
-  says support is in English.
+- **Layout: conversation first** (redesigned 2026-09-30 at Akin's request,
+  §20). The conversation is the page, not a card beside a landing page:
+  - a slim header: the logo top left, "Support" beside it, and "Available
+    now" on the right, with "End conversation" once one has started
+  - one centred column, 760 px at most, that scrolls on its own
+  - the composer docked at the bottom: the message box, a **Call** button
+    and a send button. Typing and calling start from the same place.
+  - before the first message: the RelayPay mark, "How can we help today?",
+    one lead sentence, three suggestion cards from the test scenarios, and
+    the three promises (approved answers, payment checks, a specialist when
+    needed) as one quiet row
+  - it fills the screen on a phone, with the composer above the keyboard
+- **Disclosure** under the composer, always visible: "You're talking to an
+  AI assistant. Conversations are logged for quality and follow-up."
 
 **Typing (added 2026-09-30 at Akin's request, §20).** A customer can type
 instead of speaking. It is the same product, not a second one:
@@ -1303,15 +1310,21 @@ instead of speaking. It is the same product, not a second one:
   A closed tab sends a beacon to the same endpoint, and the outbox worker
   closes any typed conversation idle for `TEXT_IDLE_CLOSE_MINUTES`, so a
   customer who left mid-escalation still gets a follow-up ticket.
-- **Not chat bubbles.** The conversation is a transcript: each turn a
-  labelled block with a small round avatar (the RelayPay mark for the
-  assistant, a person icon for the customer) and a quiet rule (accent for the
-  assistant, grey for the customer), all on the left. Before the first
-  message, three suggested questions from the test scenarios. A failed send
-  puts the message back in the box, so nothing typed is lost.
-- **Voice not configured** (no assistant id on this deployment): the page
-  opens on typing, and the voice tab says so plainly with a button to type
-  instead.
+- **Not chat-heavy.** The brand rules out messenger styling, so the
+  assistant speaks as plain text beside its mark, and the customer's words
+  sit in a light tinted panel on the right: no tails, no colour blocks, no
+  avatars for the customer. Reference numbers the system wrote (TXN-9001,
+  T-4006) are marked as small chips. A new reply fades in word by word,
+  capped at about a second. A failed send puts the message back in the box,
+  so nothing typed is lost.
+- **Voice not configured** (no assistant id on this deployment): the Call
+  button stays, and pressing it shows a plain note that voice isn't
+  available yet and typing gets the same help.
+- **A call takes over the conversation area** while it lasts: the orb, "Voice
+  call with RelayPay support", the status and a running timer, the last
+  thing the assistant said, and an End call button docked where the composer
+  was. When it ends: what happens next, and "Back to messages" or "Call
+  again".
 - **States**, all strings in one `src/app/copy.ts`:
   - the normal path: idle, asking for the microphone, connecting, listening,
     agent speaking, ending, ended
@@ -1326,7 +1339,8 @@ instead of speaking. It is the same product, not a second one:
   ids are unguessable. A typed conversation gets the same summary from
   `/api/chat/end`.
 - **Accessibility:**
-  - keyboard reachable; the two tabs follow the ARIA tabs pattern (arrow keys)
+  - keyboard reachable; the cursor returns to the message box after each
+    reply
   - status and the typed transcript in `aria-live` regions
   - colour never the only signal
   - works at 360 px wide with no sideways scroll (checked at 390 px in Edge)
@@ -1334,8 +1348,9 @@ instead of speaking. It is the same product, not a second one:
     `globals.css`, and the orb's frame loop does not start)
 - **Motion, added 2026-09-30 at Akin's request (§20).** Calm, short and
   purposeful, never decorative for its own sake:
-  - on load, the heading, points and card rise into place once, staggered
-    by 60 ms, in about half a second
+  - on load, the mark, heading, suggestions and composer rise into place
+    once, staggered by about 60 ms, in about half a second; suggestion cards
+    lift on hover
   - an "Available now" label with a slow accent ping, the page's one
     continuous motion
   - the voice orb: three rings around the microphone that grow with the
@@ -1344,8 +1359,9 @@ instead of speaking. It is the same product, not a second one:
     React), accent while the customer talks and deep blue while the assistant
     does, a slow breath while connecting, still when idle. The frame loop runs
     only while a call is live.
-  - each new transcript entry rises in; the "Checking" dots pulse while a
-    typed reply is on its way
+  - the customer's message slides in from the right, a reply fades in word
+    by word, the "Checking" dots pulse while a reply is on its way, and the
+    send button pops when there is something to send
 - **Environment:** `NEXT_PUBLIC_VAPI_PUBLIC_KEY` and
   `NEXT_PUBLIC_VAPI_ASSISTANT_ID` are the only public variables in the app.
 
@@ -1376,8 +1392,21 @@ redirected to the login page with nothing of the page rendered.
 **Scannable first.** Week 2's feedback was that a founder had to read too much
 before understanding anything. Every view leads with numbers and status, and
 the detail is one click away. The same design tokens as the customer page:
-white cards on off-white, and status colour only on pills that always carry
-words and a dot (resolved green, escalated amber, failed red, ticket blue).
+white cards on off-white, and status colour only beside words (a dot and a
+label; resolved green, escalated amber, failed red, ticket blue).
+
+**Plain language, everywhere a person reads (added 2026-09-30, §20).** The
+people using the console run support, not the system. So no command, setting
+name, tool name, raw record value, score or internal id appears on screen:
+`lookup_transaction` is "Looked up a transaction", `skipped_eval` is
+"Skipped (test)", a retrieval score and chunk ids become the article headings
+that were used, a check named `review_claim` is "No unsupported review
+claims", and the setup list says "a one-time setup by your developer" instead
+of a command. Alerts lead with a title and what it means for customers
+(`CONSOLE.alertTypes`); the system's own message sits under "For your
+developer", folded on the Alerts page and in its own block in the email. The
+translations live in `copy.ts`; `describe.ts` turns the tool log into
+actions.
 
 **Layout (redesigned 2026-09-30, §20).**
 
@@ -1404,52 +1433,78 @@ for each channel, eval included.
 1. **Today.**
    - A greeting for the time of day in Lagos.
    - "Finish setting up", shown only while something is missing: someone to
-     receive emails, the voice assistant id, the knowledge base loaded. Each
-     item says how, and ticks itself off.
+     receive emails, voice calls switched on, the help content loaded. One
+     quiet card with a progress bar ("2 of 3 done"); done items are struck
+     through.
    - Four cards: conversations today (by voice and typed), the share solved
      by the assistant of those finished, open escalations with callbacks
      booked, and alerts today with how many are critical.
    - Customer conversations per day for the last 14 days, Lagos days, as
      bars split by how they ended (solved, ticket, escalated, other), with a
-     key. Plain CSS, no chart library.
-   - "Needs a person": the soonest open escalations. "Latest conversations":
-     the six most recent, with channel, outcome and the customer's first
-     words.
-   - Speed and cost: first reply on a call and voice turn to first audio, p50
-     and p95; agent spend estimate and Vapi cost, side by side and labelled,
-     never added together.
+     key. The scale never drops below `CONSOLE_CHART_MIN_SCALE` (4), with
+     dashed gridlines, so one conversation on a quiet day is a short bar,
+     not a full-height block. Plain CSS, no chart library.
+   - "Needs a person": the soonest open escalations, each opening its case.
+     "Latest conversations": the six most recent, the customer's first words
+     first, then outcome and channel.
+   - Speed and cost: first reply on a call and voice reply time, typical and
+     slowest 5%; the AI cost estimate and the voice call bill, side by side
+     and labelled, never added together.
+
+   **Conversations and Escalations are inboxes** (redesigned 2026-09-30 at
+   Akin's request, §20): the list stays on the left (360 px), and the item
+   opens beside it at its own address (`/console/conversations/[id]`,
+   `/console/escalations/[id]`), keeping the list's filters. Under 860 px one
+   pane shows at a time, with a way back. The first version had a third
+   column of detail panels; Akin found it cramped ("too many things
+   happening"), so each item now reads top to bottom: a header, one summary
+   card, then the conversation.
 2. **Escalations.**
-   - The queue, ordered by booked time: the person, category, age, booking
-     status, notification status, and the notification error when one
-     failed.
+   - The queue, soonest callback first: the person and company, the reason in
+     two lines, the status as a dot and a word, and the callback time.
+   - A case: who (name, company, reference, category, age), the status
+     select, then one card with why a person is needed, the callback (time
+     and booking state), the contact email, the email to the team, and the
+     ticket; any booking or email error in red. Then the conversation, and
+     the status history.
    - Status changes (open, in progress, closed) save as soon as they are
-     chosen. Each change writes a row to `escalation_status_changes`, old and
-     new status, in the same statement as the update, so neither happens
-     without the other.
-3. **Conversations.** A list with channel and outcome, filterable by channel.
-   The detail view is a timeline of turns: the customer and the assistant
-   with avatars, the answer type, and an "inferred" label on a hedged
-   answer. "What happened behind this reply" opens the gate results, tool
-   calls, retrievals and cited chunks, latency and cost. A reply the checks
-   stopped is shown under the failed check, marked as never sent.
+     chosen, and the queue refreshes. Each change writes a row to
+     `escalation_status_changes`, old and new status, in the same statement
+     as the update, so neither happens without the other.
+3. **Conversations.** A list: the customer's first words, the time, then the
+   outcome, channel, number of replies and any references on one quiet line.
+   Search matches anything either side said; channel filters wrap. A
+   conversation: its first words as the title, a summary card (the outcome,
+   what happened as a row of steps such as "Looked up a transaction
+   TXN-9001", the customer, replies, first reply time, AI cost, how it
+   ended, and a link to any escalation), then the conversation as the
+   customer saw it: their words on the right, the assistant's on the left,
+   one quiet line under each reply (what kind of reply, how long it took,
+   and a tag if it was not certain, a standard reply, rewritten or failed).
+   "What the assistant checked" stays folded until opened: records checked,
+   help articles searched and used, safety checks, and any reply a check
+   held back, marked as never sent.
 4. **Knowledge.** Three tabs (§8):
    - Questions to answer: the gaps, grouped, each with "Answer this".
    - Team answers, and service notices with their end dates: each on or
      off, with how many answers have cited it. "Add" opens a form in a
      dialog.
-5. **Alerts.** Counts by severity, then the alerts with occurrences, first
-   and last seen, and whether each was delivered.
-6. **Evals.** Runs with the pass rate per scenario and per model. The
-   benchmark table lives here, counting each model's latest three benchmark
-   runs. A run with no result `EVAL_RUN_STOPPED_AFTER_MINUTES` after it
-   started shows as stopped, not running.
+5. **Alerts.** Counts by severity, then each alert as a title and what it
+   means for customers, how urgent, how often, first and last seen, and
+   whether it was emailed; the system's message folded under "For your
+   developer".
+6. **Test runs** (the eval suite, named for the team). Runs with the pass
+   rate per test and per AI model, by product name. The benchmark table
+   counts each model's latest three benchmark runs. A run with no result
+   `EVAL_RUN_STOPPED_AFTER_MINUTES` after it started shows as stopped, not
+   running.
 7. **Settings.**
    - Notifications: who receives escalation handoffs, critical alerts and
      warnings (§10.3). Add a person, switch each kind on or off, pause,
      remove, or send a test email.
-   - This deployment: the agent model, whether the voice assistant is
-     connected, the knowledge base's sections (and how many came from the
-     team), and the sending address. Read only.
+   - How this is set up: the AI model, whether voice calls are switched on,
+     the help content (and how many articles the team wrote), and the
+     sending address. Read only.
 
 ---
 
@@ -1838,6 +1893,10 @@ These go in the one-pager and the reflection, named before a grader finds them.
 | 2026-09-30 | Pending migrations run when the server starts (`src/instrumentation.ts`, §4), sharing `runMigrations()` with `npm run db:migrate`. | Akin asked for migrations to run on app start if not yet run. | Akin's `npm run dev`: "[migrations] 2 applied at start: 0006_notification_recipients.sql, 0007_team_knowledge.sql". Later dev starts logged nothing (the fast path logs only what it applies), and `npm run db:migrate`, through the same function, then said "Nothing to do: all 7 migrations are in place." Not yet seen on Vercel. |
 | 2026-09-30 | Inferred answers (§8): search returns related sections under the threshold; an answer resting on one is said with a code-written hedge; `grounding` is recorded (migration `0007`). Code decides the grounding from the tool log (FAILURES 39). | Akin asked for the agent to infer from what it knows and say it is not sure. | Coverage of all 37 sections (§8); five weak questions end to end; unit tests; the eval rows below. |
 | 2026-09-30 | "Learn from itself" is built as learning through the team: they answer the agent's gaps and post service notices in the console, and those become searchable knowledge at once (§8, migration `0007`). The agent never writes to its own knowledge. | Akin asked for the agent to learn from itself. An agent that stores its own inferences would repeat its mistakes with more confidence each time, breaking "nothing is spoken that the system cannot stand behind". This is my reading of the request; Akin has not yet confirmed it. | End to end on the dev server: a service notice ("GBP payouts running a day late") posted through `POST /api/console/knowledge` was found by the agent's search (0.741) and passed on, typed, in the next conversation. Switched off through `PATCH`, it was gone from the next answer. The test notice was then deleted. |
+| 2026-09-30 | The customer page is conversation first (§13): one full-height conversation column, the composer docked at the bottom with a Call button beside it, and a voice call taking over the same space. Replaces the two-column page with a help card and tabs. | Akin found the page below standard and chose this layout from three options, staying inside the brand doc (no messenger bubbles, no gradients). | Screenshots in Edge at 1366 px and 390 px, no sideways scroll: welcome, a typed conversation with a lookup and a ticket, the ended summary, the voice-not-available note, and the call screen connecting and failing (the dev server run with a dummy assistant id and a fake microphone). A real voice call was not made. |
+| 2026-09-30 | The console's Conversations and Escalations are inboxes with the item beside the list, and each item reads top to bottom: header, one summary card, then the conversation (§14). | Akin chose the inbox layout; the first version, with a third column of panels, was "cramped, too many things happening", and he asked for it to be calmer. | Screenshots in Edge at 1366 px of a conversation and an escalation. Not checked on a phone-sized screen yet. |
+| 2026-09-30 | Plain language everywhere a person reads (§14): no commands, setting names, tool names, raw record values, scores or ids in the console or the emails. Alerts lead with a title and what it means; the system's message is kept "for your developer". | Akin: "The people interacting with this are not technical." | A search of `copy.ts` for commands, variable names and system terms finds none in shown text. `notices.test.ts` checks the alert email leads with the plain title. |
+| 2026-09-30 | Everything Node-only in the server's start-up code moved to `src/instrumentation-node.ts`, imported under `NEXT_RUNTIME === "nodejs"` (§4, §10.1). | The Edge build followed the outbox's imports into `node:fs` and warned on every compile (FAILURES 44). | `npm run build` and a fresh `next dev`: no Edge warning. |
 | 2026-09-30 | Scripts removed: `phase0-probe`, `phase0-report`, `phase0-simulate-call`, `phase5-live-check`, and their npm commands. | Akin asked for a lean codebase. Their numbers are recorded in the rows above and in FAILURES; the rows citing them are history. | `npm run build` and `npm test` pass without them. |
 
 Record every departure from this document here, in the same piece of work as
@@ -1881,6 +1940,7 @@ replaced with measured values, with the measurement noted.
 | `RELATED_TOP_K`                        | 3                                | Related sections returned when nothing is found             |
 | `MIGRATION_CONNECT_TIMEOUT_MS`         | 10000                            | Migrations at server start give up on an unreachable database |
 | `OUTBOX_LOCAL_INTERVAL_MS`             | 60000                            | The outbox worker off Vercel (§10.1)                        |
+| `CONSOLE_CHART_MIN_SCALE`              | 4                                | The Today chart's smallest scale, so a quiet day isn't a spike (§14) |
 | `EMBEDDING_MODEL`                      | `text-embedding-3-small`         |                                                             |
 | `CALLBACK_DURATION_MIN`                | 30                               | Matches the Cal.com event type                              |
 | `SLOT_ALTERNATIVES`                    | 2                                |                                                             |

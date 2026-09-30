@@ -307,6 +307,33 @@ export function UserIcon(props: IconProps) {
   );
 }
 
+export function ArrowUpIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 19V5" />
+      <path d="M6 11l6-6 6 6" />
+    </Svg>
+  );
+}
+
+export function ReceiptIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6 3.5h12v17l-3-2-3 2-3-2-3 2z" />
+      <path d="M9 8.5h6M9 12h6M9 15.5h3" />
+    </Svg>
+  );
+}
+
+export function SearchIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M16 16l4 4" />
+    </Svg>
+  );
+}
+
 export function InfoIcon(props: IconProps) {
   return (
     <Svg {...props}>

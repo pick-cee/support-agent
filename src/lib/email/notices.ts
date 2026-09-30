@@ -1,4 +1,4 @@
-import { EMAIL } from "@/app/copy";
+import { CONSOLE, EMAIL } from "@/app/copy";
 import { ALERT_RENOTIFY_MINUTES, BUSINESS_TIMEZONE } from "@/lib/constants";
 import { renderEmail, type Attachment } from "@/lib/email/template";
 
@@ -27,34 +27,37 @@ function sentenceCase(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/**
+ * The alert in words the support team reads (CONSOLE.alertTypes); the system's
+ * own message, written for a developer, goes in its own block at the end.
+ */
 export function buildAlertEmail(alert: AlertForEmail, links: { consoleUrl: string | null; manageUrl: string | null }, direct = false): Rendered {
   const copy = EMAIL.alert;
   const critical = alert.severity === "critical";
+  const plain = CONSOLE.alertTypes[alert.type] ?? { title: sentenceCase(alert.type.replace(/_/g, " ")), meaning: "" };
   const extra = details(alert.context);
   const rendered = renderEmail({
-    preheader: alert.message.slice(0, 140),
+    preheader: plain.meaning || plain.title,
     badge: { text: copy.badge(alert.severity), tone: critical ? "danger" : "warning" },
-    title: alert.message,
-    intro: copy.intro(copy.times(alert.occurrences), lagos(alert.first_seen), ALERT_RENOTIFY_MINUTES),
+    title: plain.title,
+    intro: copy.intro(plain.meaning, copy.times(alert.occurrences), lagos(alert.first_seen), ALERT_RENOTIFY_MINUTES).trim(),
     blocks: [
       {
         kind: "facts",
         heading: copy.heading,
         rows: [
-          [copy.labels.type, sentenceCase(alert.type.replace(/_/g, " "))],
-          [copy.labels.severity, alert.severity],
           [copy.labels.seen, copy.times(alert.occurrences)],
           [copy.labels.first, lagos(alert.first_seen)],
           [copy.labels.last, lagos(alert.last_seen)],
         ],
       },
-      ...(extra.length ? [{ kind: "facts" as const, heading: copy.labels.details, rows: extra }] : []),
+      { kind: "facts", heading: copy.labels.details, rows: [[copy.technical, alert.message], ...extra] },
     ],
     action: links.consoleUrl ? { label: copy.action, url: links.consoleUrl } : undefined,
     reason: direct ? EMAIL.reasons.direct : critical ? EMAIL.reasons.critical : EMAIL.reasons.warning,
     manageUrl: links.manageUrl,
   });
-  return { subject: copy.subject(alert.severity, alert.type), ...rendered };
+  return { subject: copy.subject(alert.severity, plain.title), ...rendered };
 }
 
 export function buildTestEmail(recipient: { name: string | null; escalations: boolean; critical_alerts: boolean; warning_alerts: boolean }, links: { consoleUrl: string; manageUrl: string }): Rendered {

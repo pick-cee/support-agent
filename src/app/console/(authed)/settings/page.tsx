@@ -5,7 +5,7 @@ import { optionalEnv } from "@/lib/env";
 import { listRecipients } from "@/lib/notifications";
 
 import styles from "../../console.module.css";
-import { Badge, Card, PageHeader } from "../../parts";
+import { Badge, Card, modelLabel, PageHeader } from "../../parts";
 import { RecipientsManager } from "./recipients-manager";
 
 export default async function Settings() {
@@ -22,7 +22,7 @@ export default async function Settings() {
         <dl className={styles.facts}>
           <div>
             <dt>{s.system.model}</dt>
-            <dd>{optionalEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL}</dd>
+            <dd>{modelLabel(optionalEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL)}</dd>
           </div>
           <div>
             <dt>{s.system.voice}</dt>

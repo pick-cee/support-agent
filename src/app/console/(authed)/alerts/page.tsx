@@ -4,7 +4,7 @@ import { when } from "@/lib/console/format";
 import { alertCounts, alertsList } from "@/lib/console/queries";
 
 import styles from "../../console.module.css";
-import { Badge, Empty, PageHeader, words } from "../../parts";
+import { alertInWords, Badge, Empty, PageHeader } from "../../parts";
 
 export default async function Alerts() {
   const [rows, counts] = await Promise.all([alertsList(), alertCounts()]);
@@ -43,15 +43,21 @@ export default async function Alerts() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {rows.map((row) => {
+                const plain = alertInWords(row.type);
+                return (
                 <tr key={row.id}>
                   <td>
-                    <span className={styles.cellStrong}>{row.message}</span>
-                    <span className={styles.cellSub}>{words(row.type)}</span>
+                    <span className={styles.cellStrong}>{plain.title}</span>
+                    {plain.meaning && <span className={styles.cellSub}>{plain.meaning}</span>}
+                    <details className={styles.technical}>
+                      <summary>{a.technical}</summary>
+                      {row.message}
+                    </details>
                   </td>
                   <td>
                     <Badge tone={row.severity === "critical" ? "bad" : row.severity === "warning" ? "warn" : "neutral"} dot>
-                      {row.severity}
+                      {a.severities[row.severity] ?? row.severity}
                     </Badge>
                   </td>
                   <td className={styles.number}>{a.times(row.occurrences)}</td>
@@ -61,7 +67,8 @@ export default async function Alerts() {
                   </td>
                   <td className={styles.nowrap}>{row.notified_at ? when(row.notified_at) : row.severity === "info" ? "" : <Badge tone="bad">{a.notEmailed}</Badge>}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

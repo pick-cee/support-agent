@@ -221,16 +221,64 @@ export type ConversationRow = {
   verified_customer_id: string | null;
 };
 
-/** With no channel chosen, everything except eval runs. */
-export async function conversationsList(channel: string | null): Promise<ConversationRow[]> {
-  const result = await queryDb<ConversationRow>(
-    `select id, created_at::text, channel, turn_count, final_status, summary, agent_cost_estimate_usd::text, vapi_cost_usd::text, verified_customer_id
-       from support_agent.conversations
-      where (($1::text is null and channel <> 'eval') or channel = $1)
-      order by created_at desc limit 100`,
-    [channel],
+export type InboxConversation = ConversationRow & { first_words: string | null; tickets: string[]; escalations: string[] };
+
+/** A LIKE pattern that matches the text literally, wherever it appears. */
+function containing(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
+}
+
+/**
+ * The inbox list (DESIGN §14): with no channel chosen, everything except eval
+ * runs. A search matches anything the customer or the assistant said.
+ */
+export async function conversationsList(channel: string | null, search: string | null = null): Promise<InboxConversation[]> {
+  const result = await queryDb<InboxConversation>(
+    `select c.id, c.created_at::text, c.channel, c.turn_count, c.final_status, c.summary, c.agent_cost_estimate_usd::text, c.vapi_cost_usd::text, c.verified_customer_id,
+            (select t.user_text from support_agent.conversation_turns t where t.conversation_id = c.id order by t.turn_index limit 1) as first_words,
+            coalesce((select array_agg(k.ticket_ref order by k.created_at) from support_agent.support_tickets k where k.conversation_id = c.id), '{}') as tickets,
+            coalesce((select array_agg(e.escalation_ref order by e.created_at) from support_agent.escalations e where e.conversation_id = c.id), '{}') as escalations
+       from support_agent.conversations c
+      where (($1::text is null and c.channel <> 'eval') or c.channel = $1)
+        and ($2::text is null or exists (
+              select 1 from support_agent.conversation_turns t
+               where t.conversation_id = c.id and (t.user_text ilike $2 escape '\\' or t.spoken_text ilike $2 escape '\\')))
+      order by c.created_at desc limit 100`,
+    [channel, search ? containing(search) : null],
   );
   return result.rows;
+}
+
+export type EscalationDetail = EscalationRow & {
+  user_email: string;
+  customer_id: string | null;
+  plan: string | null;
+  booking_error: string | null;
+  preferred_time_text: string | null;
+  history: { created_at: string; from_status: string; to_status: string }[];
+};
+
+/** One escalation for its page: everything a specialist needs before calling back. */
+export async function escalationDetail(id: string): Promise<EscalationDetail | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const row = (
+    await queryDb<Omit<EscalationDetail, "history">>(
+      `select e.id, e.escalation_ref, t.ticket_ref, e.category, e.reason, e.user_name, e.user_email, e.customer_id, c.company_name, c.plan, e.status,
+              e.booking_status, e.booking_error, e.notification_status, e.notification_error, e.appointment_time::text, e.timezone,
+              e.preferred_time_text, e.created_at::text, e.conversation_id
+         from support_agent.escalations e
+         join support_agent.support_tickets t on t.id = e.ticket_id
+         left join support_agent.customers c on c.customer_id = e.customer_id
+        where e.id = $1`,
+      [id],
+    )
+  ).rows[0];
+  if (!row) return null;
+  const history = await queryDb<EscalationDetail["history"][number]>(
+    `select created_at::text, from_status, to_status from support_agent.escalation_status_changes where escalation_id = $1 order by created_at desc`,
+    [id],
+  );
+  return { ...row, history: history.rows };
 }
 
 export type TurnDetail = {
@@ -254,7 +302,7 @@ export type TurnDetail = {
   grounding: string | null;
   gate_results: { gate: string; passed: boolean; cleanup?: boolean; detail?: string; rejected?: string }[];
   tools: { tool_name: string; status: string; purpose: string; result_summary: string | null; duration_ms: number; error_message: string | null }[];
-  retrievals: { query: string; found: boolean; top_score: number | null; degraded: boolean; source_titles: string[]; chunk_ids_used: string[] }[];
+  retrievals: { query: string; found: boolean; top_score: number | null; degraded: boolean; source_titles: string[]; chunk_ids_used: string[]; used_sections: string[] }[];
 };
 
 export async function conversationDetail(id: string) {
@@ -280,7 +328,10 @@ export async function conversationDetail(id: string) {
       [id],
     ),
     queryDb<TurnDetail["retrievals"][number] & { turn_id: string | null }>(
-      `select turn_id, query, found, top_score, degraded, source_titles, chunk_ids_used from support_agent.retrieval_logs where conversation_id = $1 order by created_at`,
+      // The headings of the sections used, so the console can name them instead of showing ids.
+      `select r.turn_id, r.query, r.found, r.top_score, r.degraded, r.source_titles, r.chunk_ids_used,
+              coalesce((select array_agg(k.section_path) from support_agent.kb_chunks k where k.chunk_id = any(r.chunk_ids_used)), '{}') as used_sections
+         from support_agent.retrieval_logs r where r.conversation_id = $1 order by r.created_at`,
       [id],
     ),
     queryDb<{ created_at: string; event_type: string; summary: string; source: string }>(
@@ -291,8 +342,8 @@ export async function conversationDetail(id: string) {
       `select ticket_ref, category, priority, status, summary from support_agent.support_tickets where conversation_id = $1 order by created_at`,
       [id],
     ),
-    queryDb<{ escalation_ref: string; category: string; status: string; booking_status: string; notification_status: string; appointment_time: string | null; reason: string }>(
-      `select escalation_ref, category, status, booking_status, notification_status, appointment_time::text, reason from support_agent.escalations where conversation_id = $1 order by created_at`,
+    queryDb<{ id: string; escalation_ref: string; category: string; status: string; booking_status: string; notification_status: string; appointment_time: string | null; reason: string }>(
+      `select id, escalation_ref, category, status, booking_status, notification_status, appointment_time::text, reason from support_agent.escalations where conversation_id = $1 order by created_at`,
       [id],
     ),
   ]);
