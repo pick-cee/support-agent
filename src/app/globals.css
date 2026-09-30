@@ -1,0 +1,122 @@
+/* RelayPay design tokens (brand direction doc and its Google Doc).
+   Deep blue primary and teal-blue accent, sampled from public/brand/relaypay-logo.png
+   (docs/brand/README.md); off-white background. Professional, calm, minimal:
+   no gradients, no neon, no decorative type, two weights (400 and 600).
+   The accent is decorative only (rules, dots, focus); text in the accent family
+   uses the darker --accent-text, which meets WCAG AA on white. */
+:root {
+  --brand-primary: #0f347b;
+  --brand-primary-hover: #0b2860;
+  --brand-primary-tint: #edf1f9;
+  --brand-accent: #00b3e9;
+  --accent-text: #00708f;
+  --accent-tint: #e7f6fc;
+
+  --background: #f5f7fa;
+  --surface: #ffffff;
+  --surface-muted: #f9fafb;
+  --border: #e2e7ee;
+  --border-strong: #c9d1dc;
+  --text: #152033;
+  --text-muted: #4d596b;
+  --text-subtle: #5d6a7d;
+
+  --success: #17704b;
+  --success-tint: #e8f4ee;
+  --warning: #8a5300;
+  --warning-tint: #fdf4e3;
+  --danger: #a4262c;
+  --danger-tint: #fbeced;
+
+  --focus: #0f347b;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(15, 30, 60, 0.05);
+  --shadow: 0 1px 3px rgba(15, 30, 60, 0.06), 0 4px 12px rgba(15, 30, 60, 0.04);
+
+  --font-size-xs: 0.8125rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.375rem;
+  --font-size-2xl: 1.75rem;
+  --font-size-3xl: 2.25rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--background);
+  color: var(--text);
+}
+
+body {
+  min-height: 100vh;
+  line-height: 1.55;
+  font-size: var(--font-size-md);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: var(--brand-primary);
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--brand-primary-hover);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--accent-tint);
+}
+
+/* Hidden on screen, read by assistive technology. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
