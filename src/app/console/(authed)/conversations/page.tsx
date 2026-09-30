@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { CONSOLE } from "@/app/copy";
+import { ChatIcon, KeyboardIcon, PhoneIcon } from "@/app/icons";
 import { usd, when } from "@/lib/console/format";
 import { conversationsList } from "@/lib/console/queries";
 
@@ -13,27 +14,30 @@ export default async function Conversations({ searchParams }: { searchParams: Pr
   const requested = (await searchParams).channel;
   const channel = requested && CHANNELS.includes(requested) ? requested : null;
   const rows = await conversationsList(channel);
+  const c = CONSOLE.conversations;
   return (
     <>
-      <PageHeader title={CONSOLE.conversations.heading} intro={CONSOLE.conversations.intro} />
-      <nav className={styles.filters} aria-label="Channel">
-        <Link href="/console/conversations" className={styles.filter} aria-current={channel ? undefined : "page"}>
-          {CONSOLE.conversations.all}
-        </Link>
-        {CHANNELS.map((item) => (
-          <Link key={item} href={`/console/conversations?channel=${item}`} className={styles.filter} aria-current={channel === item ? "page" : undefined}>
-            {channelLabel(item)}
+      <PageHeader title={c.heading} intro={c.intro} />
+      <div className={styles.toolbar}>
+        <nav className={styles.filters} aria-label="Channel">
+          <Link href="/console/conversations" className={styles.filter} aria-current={channel ? undefined : "page"}>
+            {c.all}
           </Link>
-        ))}
-      </nav>
+          {CHANNELS.map((item) => (
+            <Link key={item} href={`/console/conversations?channel=${item}`} className={styles.filter} aria-current={channel === item ? "page" : undefined}>
+              {channelLabel(item)}
+            </Link>
+          ))}
+        </nav>
+      </div>
       {rows.length === 0 ? (
-        <Empty>{CONSOLE.conversations.empty}</Empty>
+        <Empty icon={<ChatIcon size={20} />}>{c.empty}</Empty>
       ) : (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
               <tr>
-                {CONSOLE.conversations.columns.map((column) => (
+                {c.columns.map((column) => (
                   <th key={column}>{column}</th>
                 ))}
               </tr>
@@ -44,14 +48,24 @@ export default async function Conversations({ searchParams }: { searchParams: Pr
                   <td className={styles.nowrap}>
                     <Link href={`/console/conversations/${row.id}`}>{when(row.created_at)}</Link>
                   </td>
-                  <td className={styles.nowrap}>{channelLabel(row.channel)}</td>
-                  <td className={styles.number}>{row.turn_count}</td>
-                  <td>
-                    <Badge tone={outcomeTone(row.final_status)}>{outcomeLabel(row.final_status)}</Badge>
+                  <td className={styles.nowrap}>
+                    <span className={styles.person}>
+                      <span className={styles.avatar} data-tone="muted" aria-hidden="true" style={{ width: 28, height: 28 }}>
+                        {row.channel === "text" ? <KeyboardIcon size={14} /> : <PhoneIcon size={14} />}
+                      </span>
+                      {channelLabel(row.channel)}
+                    </span>
                   </td>
-                  <td className={styles.wide}>{row.summary ?? ""}</td>
+                  <td>
+                    <Badge tone={outcomeTone(row.final_status)} dot>
+                      {outcomeLabel(row.final_status)}
+                    </Badge>
+                  </td>
+                  <td>
+                    <span className={styles.clamp}>{row.summary ?? ""}</span>
+                  </td>
+                  <td className={styles.number}>{row.turn_count}</td>
                   <td className={styles.number}>{usd(row.agent_cost_estimate_usd)}</td>
-                  <td className={styles.number}>{row.vapi_cost_usd ? usd(row.vapi_cost_usd) : <span className={styles.muted}>{CONSOLE.conversations.noVapiCost}</span>}</td>
                 </tr>
               ))}
             </tbody>

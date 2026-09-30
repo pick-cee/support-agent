@@ -59,6 +59,8 @@ export type GateInput = {
 export type GateVerdict = {
   results: GateResult[];
   passed: boolean;
+  /** For an answer: how it rests on the knowledge, as the evidence shows it, not as the model labelled it. */
+  grounding: "direct" | "inferred" | null;
   /** The model's text after mechanical cleanups, when every check passed. */
   text: string;
   /** When a check failed: the fixed sentence to speak instead, and its answer type. */
@@ -87,6 +89,31 @@ function shareRun(text: string, source: string, size: number): boolean {
   return false;
 }
 
+type SearchCall = ToolCallRecord & { result: Record<string, unknown> };
+
+function chunkIds(call: SearchCall, key: "chunks" | "related"): (string | undefined)[] {
+  return ((call.result[key] as { chunk_id?: string }[] | undefined) ?? []).map((chunk) => chunk.chunk_id);
+}
+
+/**
+ * How an answer rests on the knowledge, decided from the evidence. A reply the
+ * model called direct that cites a section which only came back as related
+ * (under the threshold) is said as inferred, with the hedge, rather than
+ * thrown away: Sonnet read "Cryptocurrency payments" in the related
+ * limitations section, rightly called that direct, and the caller heard a
+ * decline twice (eval, 2026-09-30). The search was not sure; the caller is told.
+ */
+export function effectiveGrounding(answer: Answer, toolCalls: ToolCallRecord[]): { grounding: "direct" | "inferred" | null; downgraded: boolean } {
+  if (answer.answer_type !== "answer") return { grounding: null, downgraded: false };
+  if (answer.grounding === "inferred") return { grounding: "inferred", downgraded: false };
+  const searches = toolCalls.filter(succeeded).filter((call) => call.name === "search_knowledge_base");
+  const found = new Set(searches.filter((call) => call.result.found === true).flatMap((call) => chunkIds(call, "chunks")));
+  const related = new Set(searches.flatMap((call) => chunkIds(call, "related")));
+  const cited = answer.kb_chunk_ids;
+  const restsOnRelated = cited.length > 0 && cited.every((id) => found.has(id) || related.has(id)) && cited.some((id) => !found.has(id));
+  return restsOnRelated ? { grounding: "inferred", downgraded: true } : { grounding: "direct", downgraded: false };
+}
+
 // --- checks --------------------------------------------------------------------------
 
 function evidenceGate(input: GateInput): GateResult {
@@ -94,9 +121,13 @@ function evidenceGate(input: GateInput): GateResult {
   const ok = (name: string) => toolCalls.filter(succeeded).filter((call) => call.name === name);
   switch (answer.answer_type) {
     case "answer": {
-      const searches = ok("search_knowledge_base").filter((call) => call.result.found === true);
-      if (!searches.length) return { gate: "evidence", passed: false, detail: "answer without a successful knowledge search this turn" };
-      const returned = new Set(searches.flatMap((call) => ((call.result.chunks as { chunk_id?: string }[] | undefined) ?? []).map((chunk) => chunk.chunk_id)));
+      // A direct answer rests on chunks a search found. An inferred one may also rest
+      // on the loosely related chunks a search returned when nothing matched closely;
+      // code then says the agent is not certain (DESIGN §8).
+      const inferred = answer.grounding === "inferred";
+      const searches = ok("search_knowledge_base").filter((call) => call.result.found === true || (inferred && chunkIds(call, "related").length > 0));
+      if (!searches.length) return { gate: "evidence", passed: false, detail: inferred ? "inferred answer without any knowledge this turn to infer from" : "answer without a successful knowledge search this turn" };
+      const returned = new Set(searches.flatMap((call) => [...chunkIds(call, "chunks"), ...(inferred ? chunkIds(call, "related") : [])]));
       const unknown = answer.kb_chunk_ids.filter((id) => !returned.has(id));
       if (!answer.kb_chunk_ids.length || unknown.length) return { gate: "evidence", passed: false, detail: `cited chunks not returned this turn: ${unknown.join(", ") || "none cited"}` };
       return { gate: "evidence", passed: true };
@@ -322,13 +353,16 @@ function fallbackFor(answer: Answer, failed: GateResult[]): { text: string; answ
   return { text: SPOKEN.fallbackDecline, answerType: "decline" };
 }
 
-export function runGates(input: GateInput): GateVerdict {
+export function runGates(given: GateInput): GateVerdict {
+  const { grounding, downgraded } = effectiveGrounding(given.answer, given.toolCalls);
+  const input: GateInput = grounding ? { ...given, answer: { ...given.answer, grounding } } : given;
   const evidenceTexts = [...input.toolCalls.filter((call) => call.result).map((call) => JSON.stringify(call.result)), ...input.callerTexts];
   const { answer } = input;
   const asksQuestion = answer.answer_type === "clarify" || answer.answer_type === "collect_details";
+  const evidence = evidenceGate(input);
 
   const results: GateResult[] = [
-    evidenceGate(input),
+    downgraded && evidence.passed ? { ...evidence, detail: "called direct, but a cited section came back only as related, so it is said as inferred, with the hedge" } : evidence,
     // A question anywhere will do: code moves it to the end below. Sonnet kept adding
     // "Please include your time zone." after its question, and rejecting that cost a
     // repair and then a fallback (typed test, 2026-09-30).
@@ -349,7 +383,7 @@ export function runGates(input: GateInput): GateVerdict {
   ];
 
   const failed = results.filter((result) => !result.passed);
-  if (failed.length) return { results, passed: false, text: "", fallback: fallbackFor(answer, failed) };
+  if (failed.length) return { results, passed: false, grounding, text: "", fallback: fallbackFor(answer, failed) };
 
   let sentences = splitSentences(answer.spoken_text.trim());
   for (const cleanup of cleanups(input)) {
@@ -374,7 +408,7 @@ export function runGates(input: GateInput): GateVerdict {
     const index = sentences.map((sentence) => sentence.endsWith("?")).lastIndexOf(true);
     if (index < 0) {
       const lost: GateResult = { gate: "question", passed: false, detail: `the checks removed the only question from ${answer.answer_type}` };
-      return { results: [...results, lost], passed: false, text: "", fallback: fallbackFor(answer, [lost]) };
+      return { results: [...results, lost], passed: false, grounding, text: "", fallback: fallbackFor(answer, [lost]) };
     }
     question = sentences[index]!;
     if (index < sentences.length - 1) results.push({ gate: "question_last", passed: true, cleanup: true, detail: `moved the question to the end: "${question}"` });
@@ -384,5 +418,5 @@ export function runGates(input: GateInput): GateVerdict {
   const trimmed = trimToLength(sentences.join(" "), room);
   const text = [trimmed.text, question].filter(Boolean).join(" ");
   results.push(trimmed.trimmed ? { gate: "length", passed: true, cleanup: true, detail: `trimmed to ${text.length} characters` } : { gate: "length", passed: true });
-  return { results, passed: true, text, fallback: null };
+  return { results, passed: true, grounding, text, fallback: null };
 }

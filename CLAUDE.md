@@ -252,8 +252,9 @@ db:check-grants` must pass. Postgres grants `EXECUTE` to `PUBLIC` by
   idempotency key, so use the adopt-existing check in DESIGN §10.2. Cal.com
   emails the attendee and the host. We don't email customers.
 - **Resend** without a verified domain delivers only to the account owner's
-  address. That address is `SUPPORT_INBOX_EMAIL` for this build. Check the
-  current docs for the allowed sender.
+  address. Who receives what is managed in the console's Settings page
+  (`notification_recipients`, DESIGN §10.3); `SUPPORT_INBOX_EMAIL` is gone.
+  Check the current docs for the allowed sender.
 
 ## Supabase and Vercel notes
 

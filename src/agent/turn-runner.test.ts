@@ -232,6 +232,57 @@ describe("runTurn", () => {
     expect(spoken).toEqual([TYPED.fallbackCollect]);
   });
 
+  // What search_knowledge_base returned for the Bitcoin eval on 2026-09-30 (top 0.388, just under the threshold).
+  const LOOSE_SEARCH: ToolCallRecord = {
+    id: "toolu_s",
+    name: "search_knowledge_base",
+    input: { query: "Can I pay a supplier in cryptocurrency such as Bitcoin?" },
+    isError: false,
+    result: { found: false, chunks: [], related: [{ chunk_id: "features-limitations", text: "RelayPay does not support: Cryptocurrency payments." }] },
+  };
+
+  it("adds the hedge to an inferred answer, before its closing question, and records the grounding", async () => {
+    // Sonnet's reply in that eval, which code had followed with the hedge after the question.
+    const { request: turn, spoken } = request(async () =>
+      agentRun({
+        toolCalls: [LOOSE_SEARCH],
+        answer: answer({
+          answer_type: "answer",
+          grounding: "inferred",
+          kb_chunk_ids: ["features-limitations"],
+          spoken_text: "RelayPay does not support cryptocurrency payments, and Bitcoin is a cryptocurrency, so you couldn't pay a supplier with it here. Would you like help with another way to pay your supplier?",
+        }),
+      }),
+    );
+    const outcome = await runTurn(turn);
+    expect(spoken.join("").trim()).toBe(
+      `RelayPay does not support cryptocurrency payments, and Bitcoin is a cryptocurrency, so you couldn't pay a supplier with it here. ${SPOKEN.inferredHedge} Would you like help with another way to pay your supplier?`,
+    );
+    expect(outcome).toMatchObject({ answerType: "answer", grounding: "inferred", replySource: "agent" });
+  });
+
+  it("hedges a direct answer that rests on a section under the threshold, instead of declining it", async () => {
+    const { request: turn, spoken } = request(async () =>
+      agentRun({ toolCalls: [LOOSE_SEARCH], answer: answer({ answer_type: "answer", grounding: "direct", kb_chunk_ids: ["features-limitations"], spoken_text: "RelayPay doesn't support cryptocurrency payments, so Bitcoin isn't accepted." }) }),
+    );
+    const outcome = await runTurn(turn);
+    expect(spoken.join("").trim()).toBe(`RelayPay doesn't support cryptocurrency payments, so Bitcoin isn't accepted. ${SPOKEN.inferredHedge}`);
+    expect(outcome).toMatchObject({ answerType: "answer", grounding: "inferred", replySource: "agent", repaired: false });
+  });
+
+  it("adds no hedge to a direct answer, and records no grounding for anything but an answer", async () => {
+    const found: ToolCallRecord = { ...LOOSE_SEARCH, result: { found: true, chunks: [{ chunk_id: "features-limitations", text: "RelayPay does not support: Cryptocurrency payments." }] } };
+    const { request: turn, spoken } = request(async () =>
+      agentRun({ toolCalls: [found], answer: answer({ answer_type: "answer", grounding: "direct", kb_chunk_ids: ["features-limitations"], spoken_text: "RelayPay does not support cryptocurrency payments." }) }),
+    );
+    const outcome = await runTurn(turn);
+    expect(spoken.join("")).not.toContain(SPOKEN.inferredHedge);
+    expect(outcome.grounding).toBe("direct");
+
+    const { request: clarify } = request(async () => agentRun({ answer: answer({ answer_type: "clarify", spoken_text: "Is it an incoming transfer or an outgoing payout?" }) }));
+    expect((await runTurn(clarify)).grounding).toBeNull();
+  });
+
   it("counts clarifying questions in a row", async () => {
     const { request: turn } = request(async () => agentRun({ answer: answer({ answer_type: "clarify", spoken_text: "Is it an incoming transfer, an outgoing payout or an invoice payment?" }) }), { clarifyStreak: 1 });
     expect((await runTurn(turn)).nextClarifyStreak).toBe(2);

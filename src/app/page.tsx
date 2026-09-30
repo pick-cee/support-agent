@@ -23,6 +23,10 @@ export default function Home() {
       <main className={styles.main}>
         <div className={styles.hero}>
           <section className={styles.intro} aria-labelledby="page-heading">
+            <p className={styles.available}>
+              <span className={styles.availableDot} aria-hidden="true" />
+              {PAGE.available}
+            </p>
             <p className={styles.eyebrow}>{PAGE.eyebrow}</p>
             <h1 id="page-heading" className={styles.heading}>
               {PAGE.heading}

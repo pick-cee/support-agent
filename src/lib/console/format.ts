@@ -20,6 +20,23 @@ export function age(iso: string, now = Date.now()): string {
   return `${Math.round(minutes / 1440)} d`;
 }
 
+/** "Wednesday 30 September", today in Lagos, for the console's top bar. */
+export function lagosToday(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: BUSINESS_TIMEZONE, weekday: "long", day: "numeric", month: "long" }).format(now).replace(",", "");
+}
+
+/** Morning, afternoon or evening in Lagos, for the greeting. */
+export function lagosDayPart(now: Date = new Date()): "morning" | "afternoon" | "evening" {
+  const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: BUSINESS_TIMEZONE, hour: "2-digit", hourCycle: "h23" }).format(now));
+  return hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+}
+
+/** "30 Sept": a Lagos date for chart labels. */
+export function shortDay(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-").map(Number) as [number, number, number];
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", day: "numeric", month: "short" }).format(new Date(Date.UTC(year, month - 1, day, 12)));
+}
+
 export function ms(value: number | null): string {
   return value === null ? "no data" : value >= 1000 ? `${(value / 1000).toFixed(1)} s` : `${value} ms`;
 }

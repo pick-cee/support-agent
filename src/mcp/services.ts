@@ -5,13 +5,11 @@ import { calConfig, runJobsNow, type SideEffectsMode } from "@/lib/outbox";
 
 import type { CalendarService, ToolServices } from "./types";
 
-// What the tools may reach beyond the database. Live books and emails for
-// real; sandbox (evals, SIDE_EFFECTS_MODE=sandbox) still reads real slots but
-// books nothing and emails no one, and records that as skipped_eval.
-
-export function sideEffectsMode(): SideEffectsMode {
-  return process.env.SIDE_EFFECTS_MODE?.trim() === "sandbox" ? "sandbox" : "live";
-}
+// What the tools may reach beyond the database. The app is always live: it
+// books and emails for real, on localhost as on Vercel. Only the eval runner,
+// a test harness, passes "sandbox" in its own code: it still reads real slots
+// but books nothing and emails no one, and records that as skipped_eval, so a
+// test run never fills the calendar or the inbox.
 
 function calendar(): CalendarService | null {
   const config = calConfig();

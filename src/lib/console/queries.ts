@@ -26,11 +26,14 @@ function percentile(values: number[], p: number): number | null {
 
 export type TodayStats = {
   conversations: number;
+  voice: number;
+  typed: number;
   finished: number;
   resolvedWithoutHuman: number;
   openEscalations: number;
   callsBooked: number;
   alertsToday: number;
+  criticalToday: number;
   firstTextP50: number | null;
   firstTextP95: number | null;
   vapiTurnP50: number | null;
@@ -41,8 +44,10 @@ export type TodayStats = {
 
 export async function todayStats(): Promise<TodayStats> {
   const [conversations, escalations, alerts, turns, reports] = await Promise.all([
-    queryDb<{ total: number; finished: number; resolved: number; agent: string; vapi: string }>(
+    queryDb<{ total: number; voice: number; typed: number; finished: number; resolved: number; agent: string; vapi: string }>(
       `select count(*)::int as total,
+              count(*) filter (where channel in ('web', 'phone'))::int as voice,
+              count(*) filter (where channel = 'text')::int as typed,
               count(*) filter (where final_status is not null)::int as finished,
               count(*) filter (where final_status = 'resolved')::int as resolved,
               coalesce(sum(agent_cost_estimate_usd), 0)::text as agent,
@@ -54,7 +59,10 @@ export async function todayStats(): Promise<TodayStats> {
               count(*) filter (where e.status <> 'closed' and e.call_booked and e.appointment_time >= now())::int as booked
          from support_agent.escalations e where ${NOT_EVAL_ESCALATION}`,
     ),
-    queryDb<{ n: number }>(`select count(*)::int as n from support_agent.alerts where last_seen >= ${TODAY} and severity <> 'info'`),
+    queryDb<{ n: number; critical: number }>(
+      `select count(*)::int as n, count(*) filter (where severity = 'critical')::int as critical
+         from support_agent.alerts where last_seen >= ${TODAY} and severity <> 'info'`,
+    ),
     queryDb<{ ttft_ms: number }>(
       `select t.ttft_ms from support_agent.conversation_turns t join support_agent.conversations c on c.id = t.conversation_id
         where c.channel in ('web', 'phone') and t.created_at >= ${TODAY} and t.ttft_ms is not null`,
@@ -71,11 +79,14 @@ export async function todayStats(): Promise<TodayStats> {
   const vapi = reports.rows.map((row) => row.latency);
   return {
     conversations: c.total,
+    voice: c.voice,
+    typed: c.typed,
     finished: c.finished,
     resolvedWithoutHuman: c.resolved,
     openEscalations: escalations.rows[0]!.open,
     callsBooked: escalations.rows[0]!.booked,
     alertsToday: alerts.rows[0]!.n,
+    criticalToday: alerts.rows[0]!.critical,
     firstTextP50: percentile(firstText, 50),
     firstTextP95: percentile(firstText, 95),
     vapiTurnP50: percentile(vapi, 50),
@@ -83,6 +94,71 @@ export async function todayStats(): Promise<TodayStats> {
     agentSpendEstimateUsd: Number(c.agent),
     vapiCostUsd: Number(c.vapi),
   };
+}
+
+export type DayActivity = { day: string; resolved: number; ticket_created: number; escalated: number; other: number };
+
+/** Customer conversations per Lagos day for the last `days` days, by how they ended; days with none are included. */
+export async function dailyActivity(days: number): Promise<DayActivity[]> {
+  const result = await queryDb<DayActivity>(
+    `with days as (
+       select generate_series((now() at time zone 'Africa/Lagos')::date - ($1::int - 1), (now() at time zone 'Africa/Lagos')::date, interval '1 day')::date as day
+     )
+     select to_char(d.day, 'YYYY-MM-DD') as day,
+            count(c.id) filter (where c.final_status = 'resolved')::int as resolved,
+            count(c.id) filter (where c.final_status = 'ticket_created')::int as ticket_created,
+            count(c.id) filter (where c.final_status = 'escalated')::int as escalated,
+            count(c.id) filter (where c.id is not null and (c.final_status is null or c.final_status in ('abandoned', 'failed')))::int as other
+       from days d
+       left join support_agent.conversations c
+         on (c.created_at at time zone 'Africa/Lagos')::date = d.day and c.channel in ${CUSTOMER_CHANNELS}
+      group by d.day order by d.day`,
+    [days],
+  );
+  return result.rows;
+}
+
+export type RecentConversation = { id: string; created_at: string; channel: string; final_status: string | null; summary: string | null; turn_count: number; first_words: string | null };
+
+export async function recentConversations(limit: number): Promise<RecentConversation[]> {
+  const result = await queryDb<RecentConversation>(
+    `select c.id, c.created_at::text, c.channel, c.final_status, c.summary, c.turn_count,
+            (select t.user_text from support_agent.conversation_turns t where t.conversation_id = c.id order by t.turn_index limit 1) as first_words
+       from support_agent.conversations c
+      where c.channel in ${CUSTOMER_CHANNELS}
+      order by c.created_at desc limit $1`,
+    [limit],
+  );
+  return result.rows;
+}
+
+/** For the sidebar: work waiting on a person, and problems from the last day. */
+export async function navCounts(): Promise<{ escalations: number; alerts: number }> {
+  const [escalations, alerts] = await Promise.all([
+    queryDb<{ n: number }>(`select count(*)::int as n from support_agent.escalations e where e.status <> 'closed' and ${NOT_EVAL_ESCALATION}`),
+    queryDb<{ n: number }>(`select count(*)::int as n from support_agent.alerts where severity <> 'info' and last_seen > now() - interval '1 day'`),
+  ]);
+  return { escalations: escalations.rows[0]?.n ?? 0, alerts: alerts.rows[0]?.n ?? 0 };
+}
+
+export async function knowledgeCounts(): Promise<{ document: number; team: number }> {
+  const result = await queryDb<{ document: number; team: number }>(
+    `select count(*) filter (where origin = 'document')::int as document, count(*) filter (where origin = 'team')::int as team
+       from support_agent.kb_chunks where active and (expires_at is null or expires_at > now())`,
+  );
+  return result.rows[0] ?? { document: 0, team: 0 };
+}
+
+export type AlertCounts = { critical: number; warning: number; info: number };
+
+export async function alertCounts(): Promise<AlertCounts> {
+  const result = await queryDb<AlertCounts>(
+    `select count(*) filter (where severity = 'critical')::int as critical,
+            count(*) filter (where severity = 'warning')::int as warning,
+            count(*) filter (where severity = 'info')::int as info
+       from support_agent.alerts where last_seen > now() - interval '7 days'`,
+  );
+  return result.rows[0] ?? { critical: 0, warning: 0, info: 0 };
 }
 
 export type EscalationRow = {
@@ -96,6 +172,7 @@ export type EscalationRow = {
   status: string;
   booking_status: string;
   notification_status: string;
+  notification_error: string | null;
   appointment_time: string | null;
   timezone: string | null;
   created_at: string;
@@ -106,7 +183,7 @@ export type EscalationRow = {
 export async function escalationsQueue(includeClosed: boolean): Promise<EscalationRow[]> {
   const result = await queryDb<EscalationRow>(
     `select e.id, e.escalation_ref, t.ticket_ref, e.category, e.reason, e.user_name, c.company_name, e.status, e.booking_status,
-            e.notification_status, e.appointment_time::text, e.timezone, e.created_at::text, e.conversation_id
+            e.notification_status, e.notification_error, e.appointment_time::text, e.timezone, e.created_at::text, e.conversation_id
        from support_agent.escalations e
        join support_agent.support_tickets t on t.id = e.ticket_id
        left join support_agent.customers c on c.customer_id = e.customer_id
@@ -174,6 +251,7 @@ export type TurnDetail = {
   total_ms: number | null;
   cost_estimate_usd: string | null;
   model: string | null;
+  grounding: string | null;
   gate_results: { gate: string; passed: boolean; cleanup?: boolean; detail?: string; rejected?: string }[];
   tools: { tool_name: string; status: string; purpose: string; result_summary: string | null; duration_ms: number; error_message: string | null }[];
   retrievals: { query: string; found: boolean; top_score: number | null; degraded: boolean; source_titles: string[]; chunk_ids_used: string[] }[];
@@ -193,7 +271,7 @@ export async function conversationDetail(id: string) {
   const [turns, tools, retrievals, events, tickets, escalations] = await Promise.all([
     queryDb<Omit<TurnDetail, "tools" | "retrievals">>(
       `select id, turn_index, created_at::text, user_text, spoken_text, answer_type, reply_source, status, error, confidence_note, repaired, fallback_used, filler_used,
-              ttft_ms, total_ms, cost_estimate_usd::text, model, gate_results
+              ttft_ms, total_ms, cost_estimate_usd::text, model, grounding, gate_results
          from support_agent.conversation_turns where conversation_id = $1 order by turn_index`,
       [id],
     ),

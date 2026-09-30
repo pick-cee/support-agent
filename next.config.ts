@@ -22,6 +22,10 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/vapi/chat/completions": AGENT_PROGRAM,
     "/api/chat": AGENT_PROGRAM,
+    // Every function runs pending migrations when it starts (src/instrumentation.ts),
+    // and any of them may send an email with the logo attached: both are read from
+    // disk, which the tracer cannot see on its own.
+    "/*": ["./supabase/migrations/*.sql", "./public/brand/relaypay-logo-email.png"],
   },
 };
 

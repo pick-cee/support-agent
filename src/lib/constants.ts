@@ -100,6 +100,17 @@ export const EMBEDDING_TIMEOUT_MS = 4_000;
 export const RETRIEVAL_MIN_SCORE: number | null = 0.39;
 /** The BM25 floor for memory and degraded (full-text only) search. Same run: precision 0.950, recall 0.528. */
 export const MEMORY_RETRIEVAL_MIN_SCORE: number = 4.5;
+/**
+ * Below the threshold, hits still this close are returned as "related": the
+ * agent may infer from them, and code says it is not certain (DESIGN §8). From
+ * the same calibration: at 0.30 the right section is in the top four for 0.971
+ * of in-scope questions, and 6 of 9 out-of-scope questions also reach it, which
+ * is why these answers are always hedged, never stated as fact.
+ */
+export const RELATED_MIN_SCORE = 0.3;
+/** The BM25 equivalent for memory and degraded search (recall 0.774 at 2.5 in the same run). */
+export const MEMORY_RELATED_MIN_SCORE = 2.5;
+export const RELATED_TOP_K = 3;
 
 // --- Tickets, escalations, callbacks ---------------------------------------------------
 export const TICKET_CATEGORIES = ["payment", "payout", "invoice", "account", "compliance", "dispute", "refund", "cancellation", "other"] as const;
@@ -136,6 +147,8 @@ export const JOB_MAX_ATTEMPTS = 6;
 /** Minutes before each retry: 1, 2, 4, 8, 16, 32 (DESIGN §10.1). */
 export const JOB_BACKOFF_MINUTES = [1, 2, 4, 8, 16, 32] as const;
 export const OUTBOX_BATCH_SIZE = 10;
+/** Off Vercel, the server runs the outbox worker itself this often; pg_cron cannot reach localhost. */
+export const OUTBOX_LOCAL_INTERVAL_MS = 60_000;
 export const ALERT_RENOTIFY_MINUTES = 30;
 
 // --- The support console ------------------------------------------------------------
@@ -159,6 +172,8 @@ export const BUSINESS_TIMEZONE = "Africa/Lagos";
 
 // --- Database --------------------------------------------------------------------
 export const DB_SCHEMA = "support_agent";
+/** Migrations run at server start; a database that cannot be reached must not hold the start for long. */
+export const MIGRATION_CONNECT_TIMEOUT_MS = 10_000;
 /** A tool's own database work; the agent's MCP timeout is the outer bound. */
 export const TOOL_QUERY_TIMEOUT_MS = 5_000;
 

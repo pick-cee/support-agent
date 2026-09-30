@@ -1,25 +1,24 @@
 import "server-only";
 
-import { SESSION_COOKIE, sessionValid } from "@/lib/console/auth";
 import { changeEscalationStatus } from "@/lib/console/queries";
-import { sameOrigin } from "@/lib/same-origin";
+import { consoleWriteAllowed, json, readJson, UUID } from "@/lib/console/request";
 
 export const runtime = "nodejs";
 
-function cookieValue(request: Request): string | undefined {
-  return request.headers
-    .get("cookie")
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${SESSION_COOKIE}=`))
-    ?.slice(SESSION_COOKIE.length + 1);
-}
-
-/** The console's only write (DESIGN §14): an escalation status change, recorded as a row. */
+/**
+ * An escalation status change (DESIGN §14), recorded as a row. The console's
+ * status menu sends JSON and updates in place; a plain form post (no script)
+ * still works and comes back to the page.
+ */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
-  if (!sameOrigin(request) || !sessionValid(cookieValue(request))) return new Response("Forbidden", { status: 403 });
+  if (!consoleWriteAllowed(request)) return new Response("Forbidden", { status: 403 });
   const { id } = await context.params;
-  if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Not found", { status: 404 });
+  if (!UUID.test(id)) return new Response("Not found", { status: 404 });
+  if (request.headers.get("content-type")?.includes("application/json")) {
+    const body = await readJson(request);
+    const changed = await changeEscalationStatus(id, String(body?.status ?? ""));
+    return json({ ok: changed });
+  }
   const form = await request.formData();
   await changeEscalationStatus(id, String(form.get("status") ?? ""));
   const back = String(form.get("back") ?? "/console/escalations");

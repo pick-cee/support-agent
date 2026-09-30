@@ -58,8 +58,83 @@
   padding-top: 24px;
 }
 
+.intro > * {
+  animation: rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.intro > *:nth-child(2) {
+  animation-delay: 60ms;
+}
+
+.intro > *:nth-child(3) {
+  animation-delay: 120ms;
+}
+
+.intro > *:nth-child(4) {
+  animation-delay: 180ms;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.available {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 5px 12px 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.availableDot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand-accent);
+}
+
+.availableDot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--brand-accent);
+  opacity: 0;
+  animation: ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.6;
+  }
+
+  80%,
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
 .card {
   grid-area: card;
+  animation: rise 560ms cubic-bezier(0.2, 0.8, 0.2, 1) both 140ms;
 }
 
 .points {
@@ -131,6 +206,25 @@
   display: flex;
   gap: 14px;
   align-items: flex-start;
+  animation: rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.point:nth-child(1) {
+  animation-delay: 240ms;
+}
+
+.point:nth-child(2) {
+  animation-delay: 300ms;
+}
+
+.point:nth-child(3) {
+  animation-delay: 360ms;
+}
+
+.point:hover .pointIcon {
+  transform: translateY(-2px);
+  background: var(--accent-tint);
+  color: var(--accent-text);
 }
 
 .pointIcon {
@@ -142,6 +236,7 @@
   border-radius: var(--radius);
   background: var(--brand-primary-tint);
   color: var(--brand-primary);
+  transition: transform 180ms ease, background-color 180ms ease, color 180ms ease;
 }
 
 .pointTitle {
@@ -160,6 +255,7 @@
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
+  border-top: 4px solid var(--brand-primary);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   padding: 8px;
@@ -314,53 +410,104 @@
   padding: 8px 0 4px;
 }
 
-.micRing {
+/* The orb: rings that breathe with whoever is talking (--level, 0 to 1, set
+   from the volume events), and sit still when nobody is. */
+.orb {
+  --level: 0;
+  position: relative;
   display: grid;
   place-items: center;
-  width: 84px;
-  height: 84px;
-  margin: 0 auto 16px;
+  width: 132px;
+  height: 132px;
+  margin: 4px auto 18px;
+}
+
+.orbRing {
+  position: absolute;
+  inset: 0;
   border-radius: 50%;
   background: var(--brand-primary-tint);
-  color: var(--brand-primary);
-  border: 1px solid var(--border);
-  position: relative;
+  opacity: 0.35;
+  transform: scale(0.72);
+  transition: transform 90ms linear, opacity 240ms ease, background-color 240ms ease;
 }
 
-/* A quiet ring shows the line is live; it moves only while someone is talking. */
-.micRing[data-state="listening"],
-.micRing[data-state="speaking"],
-.micRing[data-state="busy"] {
-  border-color: var(--brand-accent);
+.orbRing[data-ring="2"] {
+  transform: scale(0.84);
+  opacity: 0.25;
 }
 
-.micRing[data-state="listening"]::after,
-.micRing[data-state="speaking"]::after {
-  content: "";
-  position: absolute;
-  inset: -7px;
-  border-radius: 50%;
-  border: 2px solid var(--brand-accent);
-  opacity: 0.45;
+.orbRing[data-ring="3"] {
+  transform: scale(0.96);
+  opacity: 0.15;
+}
+
+.orb[data-state="listening"] .orbRing {
+  background: var(--accent-tint);
+}
+
+.orb[data-state="speaking"] .orbRing {
+  background: #dbe3f3;
+}
+
+.orb[data-state="listening"] .orbRing[data-ring="1"],
+.orb[data-state="speaking"] .orbRing[data-ring="1"] {
+  transform: scale(calc(0.72 + var(--level) * 0.14));
+  opacity: 0.8;
+}
+
+.orb[data-state="listening"] .orbRing[data-ring="2"],
+.orb[data-state="speaking"] .orbRing[data-ring="2"] {
+  transform: scale(calc(0.84 + var(--level) * 0.2));
+  opacity: 0.55;
+}
+
+.orb[data-state="listening"] .orbRing[data-ring="3"],
+.orb[data-state="speaking"] .orbRing[data-ring="3"] {
+  transform: scale(calc(0.96 + var(--level) * 0.26));
+  opacity: 0.35;
+}
+
+.orb[data-state="busy"] .orbRing[data-ring="3"] {
   animation: breathe 1.8s ease-in-out infinite;
-}
-
-.micRing[data-state="speaking"] {
-  background: var(--brand-primary);
-  color: #ffffff;
 }
 
 @keyframes breathe {
   0%,
   100% {
-    transform: scale(1);
-    opacity: 0.45;
+    transform: scale(0.9);
+    opacity: 0.15;
   }
 
   50% {
-    transform: scale(1.06);
-    opacity: 0.15;
+    transform: scale(1);
+    opacity: 0.35;
   }
+}
+
+.orbCore {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  color: var(--brand-primary);
+  transition: background-color 240ms ease, color 240ms ease, border-color 240ms ease;
+}
+
+.orb[data-state="listening"] .orbCore {
+  border-color: var(--brand-accent);
+  color: var(--accent-text);
+}
+
+.orb[data-state="speaking"] .orbCore {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: #ffffff;
 }
 
 .voiceHeading {
@@ -511,11 +658,38 @@
 }
 
 .entry {
-  padding: 2px 0 2px 14px;
-  border-left: 2px solid var(--border-strong);
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  animation: rise 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.entry[data-role="assistant"] {
+.entryAvatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-subtle);
+}
+
+.entry[data-role="customer"] .entryAvatar {
+  background: var(--brand-primary-tint);
+  border-color: transparent;
+  color: var(--brand-primary);
+}
+
+.entryText {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 0 0 12px;
+  border-left: 2px solid var(--border);
+}
+
+.entry[data-role="assistant"] .entryText {
   border-left-color: var(--brand-accent);
 }
 

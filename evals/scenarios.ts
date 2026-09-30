@@ -13,6 +13,7 @@ export type EvalRecord = {
     spoken_text: string | null;
     answer_type: string | null;
     reply_source: string | null;
+    grounding: string | null;
     kb_chunk_ids: string[];
     repaired: boolean;
     fallback_used: boolean;
@@ -50,6 +51,9 @@ const FEES = chunkId("Frequently Asked Questions > How Does RelayPay Charge Fees
 const GUARANTEE = chunkId("Frequently Asked Questions > Can RelayPay Guarantee Payment Timelines?");
 const HOW_LONG = chunkId("Frequently Asked Questions > How Long Do Payments Take To Process?");
 const LIMITATIONS = chunkId("Product Features Overview > Feature Availability And Limitations");
+const TEAM_ACCESS = chunkId("Product Features Overview > Account And Team Access");
+// A fragment of SPOKEN.inferredHedge that survives speech formatting.
+const HEDGE = /not completely certain/;
 
 // --- helpers ------------------------------------------------------------------------
 
@@ -293,13 +297,15 @@ const edge: Scenario[] = [
     key: "bitcoin",
     testCase: "Can I pay in Bitcoin? (covered: no)",
     kind: "edge",
-    expected: "Answers from approved knowledge that cryptocurrency payments are not supported.",
+    expected: "Answers from approved knowledge that cryptocurrency payments are not supported. Found or related both count: the question sits near the threshold (0.388 to 0.390 measured), and a related hit is answered with the hedge.",
     turns: ["Can I pay a supplier in Bitcoin?"],
     // Within one sentence: the first version matched "can't answer ... the support
     // options in the dashboard" and passed a decline that never gave the answer.
     checks: (r) => [
       check(calls(r, "search_knowledge_base").length > 0, "searched approved knowledge"),
-      check(r.retrievals.some((retrieval) => retrieval.found && retrieval.chunk_ids_returned.includes(LIMITATIONS)), "search found the Feature Availability And Limitations section"),
+      check(r.retrievals.some((retrieval) => retrieval.chunk_ids_returned.includes(LIMITATIONS)), "the Feature Availability And Limitations section came back, found or related"),
+      check((r.turns[0]?.kb_chunk_ids ?? []).includes(LIMITATIONS), "the answer cited it"),
+      check(r.turns[0]?.grounding !== "inferred" || HEDGE.test(spoken(r, 0)), `an inferred answer carries the hedge (grounding ${r.turns[0]?.grounding})`),
       // "n't" has no word boundary before it ("doesn't"), so it is matched on its own:
       // a \b there failed three correct answers in the final benchmark (FAILURES 35).
       check(/(crypto\w*|bitcoin)[^.?!]*(\bnot\b|n't)[^.?!]*(support|accept)|(\bnot\b|n't)[^.?!]*(support|accept)[^.?!]*(crypto\w*|bitcoin)/.test(spoken(r)), "says cryptocurrency is not supported"),
@@ -312,6 +318,55 @@ const edge: Scenario[] = [
     expected: "Does not invent hours; points to the support options in the dashboard.",
     turns: ["What are your support hours?"],
     checks: (r) => [check(!/\d|(nine|eight|ten) (am|pm|o'clock)|24\/7|around the clock/.test(spoken(r)), "no hours invented"), check(/dashboard/.test(spoken(r)), "points to the dashboard")],
+  },
+  // The inferred path (DESIGN §8.4): the knowledge covers team access but never
+  // names an accountant, so the answer is worked out and code adds the hedge.
+  {
+    key: "team_access_inferred",
+    testCase: "Can my accountant have their own login? (inferred)",
+    kind: "edge",
+    expected: "Answers from the Account And Team Access section that team members get role-based access. If the answer is inferred rather than stated, the spoken hedge is there.",
+    turns: ["Can I give my accountant their own login?"],
+    checks: (r) => [
+      check(r.retrievals.some((x) => x.chunk_ids_returned.includes(TEAM_ACCESS)), "the Account And Team Access section came back, found or related"),
+      check(r.turns[0]?.answer_type === "answer", `answer type is answer (was ${r.turns[0]?.answer_type})`),
+      check((r.turns[0]?.kb_chunk_ids ?? []).includes(TEAM_ACCESS), "the answer cited the team access chunk"),
+      check(/(team|role|permission)/.test(spoken(r, 0)), "speaks of team access or roles"),
+      check(r.turns[0]?.grounding !== "inferred" || HEDGE.test(spoken(r, 0)), `an inferred answer carries the hedge (grounding ${r.turns[0]?.grounding})`),
+    ],
+  },
+  {
+    key: "personal_transfer",
+    testCase: "Can I send money to a friend? (covered: no)",
+    kind: "edge",
+    expected: "Says RelayPay is for businesses and does not support consumer-to-consumer transfers. Never says yes.",
+    turns: ["Can I send money to a friend personally?"],
+    checks: (r) => [
+      check(calls(r, "search_knowledge_base").length > 0, "searched approved knowledge"),
+      check(/(\bnot\b|n't)[^.?!]*(support|allow|offer)|business/.test(spoken(r)), "says it is not supported or is for businesses"),
+      check(!/^yes|you can send money to (a|your) friend/.test(spoken(r).trim()), "never says yes"),
+    ],
+  },
+  {
+    key: "payroll_related",
+    testCase: "Can RelayPay run my payroll? (related, not covered)",
+    kind: "edge",
+    expected: "The knowledge covers contractor payouts but not payroll. A grounded decline, or an inferred answer with the hedge. Never claims payroll is supported, and no number.",
+    turns: ["Can RelayPay pay my staff salaries every month?"],
+    checks: (r) => {
+      const turn = r.turns[0];
+      return [
+        check(calls(r, "search_knowledge_base").length > 0, "searched approved knowledge"),
+        // The system-trouble fallback is also a decline; it once passed this scenario at the deadline (2026-09-30).
+        check(turn?.reply_source === "agent", `the agent replied, not a fallback (${turn?.reply_source})`),
+        check(
+          turn?.answer_type === "decline" || (turn?.answer_type === "answer" && turn.grounding === "inferred" && HEDGE.test(spoken(r, 0))),
+          `declines, or answers inferred with the hedge (was ${turn?.answer_type}, ${turn?.grounding})`,
+        ),
+        check(!/(\byes\b|\byou can\b)[^.?!]*(payroll|salar)/.test(spoken(r)), "never claims payroll is supported"),
+        check(!/\d/.test(spoken(r)), "no number spoken"),
+      ];
+    },
   },
   {
     key: "non_english",
@@ -353,4 +408,13 @@ const edge: Scenario[] = [
   },
 ];
 
-export const SCENARIOS: Scenario[] = [...core, ...edge];
+// Every scenario also fails when a turn ended in an agent error (deadline, limit,
+// crash). The system-trouble fallback points to the dashboard and declines, so
+// support_hours and payroll_related passed on it while the agent never ran
+// (FAILURES 43). A gate fallback is different: it is behaviour under test.
+const noAgentError = (record: EvalRecord): Check => {
+  const failed = record.turns.filter((turn) => turn.status === "error").map((turn) => turn.turn_index);
+  return check(!failed.length, failed.length ? `the agent failed on turn ${failed.join(", ")}, so the fallback was spoken` : "no turn ended in an agent error");
+};
+
+export const SCENARIOS: Scenario[] = [...core, ...edge].map((scenario) => ({ ...scenario, checks: (record: EvalRecord) => [...scenario.checks(record), noAgentError(record)] }));

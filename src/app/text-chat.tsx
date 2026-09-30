@@ -1,11 +1,12 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { TEXT_COUNTER_FROM_CHARS, TEXT_MESSAGE_MAX_CHARS } from "@/lib/constants";
 
 import { PAGE, TYPED } from "./copy";
-import { SendIcon } from "./icons";
+import { SendIcon, UserIcon } from "./icons";
 import styles from "./page.module.css";
 import { SummaryCard, type Summary } from "./summary-card";
 
@@ -151,12 +152,21 @@ export function TextChat() {
       >
         {entries.map((entry) => (
           <div key={entry.id} className={styles.entry} data-role={entry.role}>
-            <p className={styles.who}>{entry.role === "customer" ? PAGE.text.you : PAGE.text.assistant}</p>
-            <p className={styles.message}>{entry.text}</p>
+            <span className={styles.entryAvatar} aria-hidden="true">
+              {entry.role === "assistant" ? <Image src="/icon.png" alt="" width={18} height={18} /> : <UserIcon size={16} />}
+            </span>
+            <div className={styles.entryText}>
+              <p className={styles.who}>{entry.role === "customer" ? PAGE.text.you : PAGE.text.assistant}</p>
+              <p className={styles.message}>{entry.text}</p>
+            </div>
           </div>
         ))}
         {pending && (
           <div className={styles.entry} data-role="assistant">
+            <span className={styles.entryAvatar} aria-hidden="true">
+              <Image src="/icon.png" alt="" width={18} height={18} />
+            </span>
+            <div className={styles.entryText}>
             <p className={styles.who}>{PAGE.text.assistant}</p>
             <p className={styles.thinking}>
               <span className={styles.thinkingDots} aria-hidden="true">
@@ -166,6 +176,7 @@ export function TextChat() {
               </span>
               {PAGE.text.thinking}
             </p>
+            </div>
           </div>
         )}
       </div>

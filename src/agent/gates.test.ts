@@ -230,6 +230,40 @@ describe("evidence", () => {
     expect(gate({ toolCalls: [search], answer: answer({ answer_type: "answer", spoken_text: "Fees vary.", kb_chunk_ids: ["faq-fees"] }) }).passed).toBe(true);
     expect(failedGates(gate({ toolCalls: [search], answer: answer({ answer_type: "answer", spoken_text: "Fees vary.", kb_chunk_ids: ["faq-other"] }) }))).toEqual(["evidence"]);
   });
+
+  // What search_knowledge_base returned for "Can I give my accountant their own login?" (top 0.376).
+  const looseSearch: ToolCallRecord = {
+    id: "s2",
+    name: "search_knowledge_base",
+    input: {},
+    isError: false,
+    result: { found: false, chunks: [], related: [{ chunk_id: "features-team", text: "Team member access with role-based permissions." }] },
+  };
+
+  it("accepts an inferred answer that rests on a related section", () => {
+    const verdict = gate({ toolCalls: [looseSearch], answer: answer({ answer_type: "answer", grounding: "inferred", spoken_text: "Team members can have their own access.", kb_chunk_ids: ["features-team"] }) });
+    expect(verdict.passed).toBe(true);
+  });
+
+  it("says a direct answer resting on a related section as inferred, rather than rejecting it", () => {
+    // Sonnet called "Cryptocurrency payments" in the related limitations section direct, twice (eval, 2026-09-30).
+    const verdict = gate({ toolCalls: [looseSearch], answer: answer({ answer_type: "answer", grounding: "direct", spoken_text: "Team members can have their own access.", kb_chunk_ids: ["features-team"] }) });
+    expect(verdict.passed).toBe(true);
+    expect(verdict.grounding).toBe("inferred");
+    expect(verdict.results.find((result) => result.gate === "evidence")?.detail).toMatch(/said as inferred/);
+  });
+
+  it("keeps a direct answer direct when every cited section was found", () => {
+    const found: ToolCallRecord = { id: "s3", name: "search_knowledge_base", input: {}, isError: false, result: { found: true, chunks: [{ chunk_id: "faq-fees", text: "Fees vary." }] } };
+    expect(gate({ toolCalls: [found], answer: answer({ answer_type: "answer", spoken_text: "Fees vary.", kb_chunk_ids: ["faq-fees"] }) }).grounding).toBe("direct");
+    expect(gate({ toolCalls: [found, looseSearch], answer: answer({ answer_type: "answer", spoken_text: "Fees vary.", kb_chunk_ids: ["faq-fees", "features-team"] }) }).grounding).toBe("inferred");
+    expect(gate({ answer: answer({ answer_type: "clarify", spoken_text: "Which payment?" }) }).grounding).toBeNull();
+  });
+
+  it("rejects an inferred answer citing a section the search did not return", () => {
+    const verdict = gate({ toolCalls: [looseSearch], answer: answer({ answer_type: "answer", grounding: "inferred", spoken_text: "Team members can have their own access.", kb_chunk_ids: ["features-other"] }) });
+    expect(failedGates(verdict)).toEqual(["evidence"]);
+  });
 });
 
 describe("questions and the clarify streak", () => {

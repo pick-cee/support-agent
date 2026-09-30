@@ -24,9 +24,9 @@ async function main(): Promise<void> {
     repository = repo;
     services = memoryServices(repo);
   } else {
-    const [{ supabaseRepository }, { supabaseServices, sideEffectsMode }] = await Promise.all([import("../src/mcp/supabase-repository"), import("../src/mcp/services")]);
+    const [{ supabaseRepository }, { supabaseServices }] = await Promise.all([import("../src/mcp/supabase-repository"), import("../src/mcp/services")]);
     repository = supabaseRepository;
-    services = supabaseServices(sideEffectsMode(), (work) => void work().catch((error: unknown) => console.error(String(error))));
+    services = supabaseServices("live", (work) => void work().catch((error: unknown) => console.error(String(error))));
   }
   const conversationId = await repository.createConversation("mcp_direct");
   console.error(`RelayPay MCP server on stdio, ${repository.backend} backend, conversation ${conversationId}`);

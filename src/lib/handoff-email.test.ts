@@ -23,6 +23,7 @@ const base: HandoffInput = {
   agentLines: ["I'm sorry. A specialist needs to look at this.", "What's the best email for you?", "Thanks."],
   toolCalls: [{ tool_name: "lookup_customer", status: "ok", result_summary: "verified CUS-1003" }],
   consoleUrl: "https://example.test/console/conversations/1",
+  manageUrl: "https://example.test/console/settings",
 };
 
 describe("buildHandoffEmail", () => {
@@ -32,12 +33,13 @@ describe("buildHandoffEmail", () => {
 
   it("lays the body out in the order DESIGN §10.3 gives", () => {
     const { text } = buildHandoffEmail(base);
-    const order = ["Caller", "Why", "What we already told them", "What we looked up", "Booking", "Ticket", "Console"].map((heading) => text.indexOf(`${heading}\n`));
+    const order = ["CALLER", "WHY", "THE CUSTOMER'S LAST WORDS", "WHAT WE ALREADY TOLD THEM", "WHAT WE LOOKED UP", "BOOKING"].map((heading) => text.indexOf(`${heading}\n`));
     expect(order.every((position, index) => position >= 0 && (index === 0 || position > order[index - 1]!))).toBe(true);
     expect(text).toContain("Verified as CUS-1003 (AccraStack)");
     expect(text).toContain("Booked for Tuesday 6 October at 2 PM Lagos time.");
-    expect(text).not.toContain("My account was restricted and nobody is helping me.\"\n  \"Efua");
-    expect(text.match(/^ {2}"/gm)).toHaveLength(3);
+    expect(text).toContain("Open the conversation: https://example.test/console/conversations/1");
+    // The last three things the caller said, quoted.
+    expect(text.match(/^ {2}"/gm)).toHaveLength(3 + 2);
   });
 
   it("says plainly when no call is booked, and why", () => {
@@ -47,7 +49,11 @@ describe("buildHandoffEmail", () => {
     expect(text).toContain("Not verified");
   });
 
-  it("escapes HTML", () => {
-    expect(buildHandoffEmail({ ...base, escalation: { ...base.escalation, reason: "<script>x</script>" } }).html).not.toContain("<script>");
+  it("escapes HTML and attaches the logo the HTML shows", () => {
+    const email = buildHandoffEmail({ ...base, escalation: { ...base.escalation, reason: "<script>x</script>" } });
+    expect(email.html).not.toContain("<script>");
+    expect(email.html).toContain('src="cid:relaypay-logo"');
+    expect(email.attachments).toEqual([expect.objectContaining({ content_id: "relaypay-logo", filename: "relaypay-logo.png" })]);
+    expect(email.attachments[0]!.content.length).toBeGreaterThan(1000);
   });
 });

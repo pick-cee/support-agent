@@ -504,3 +504,78 @@ here, never from memory afterwards.
   installed on this Windows machine, so that it lands in the bundle can only
   be confirmed by a Vercel build: check the function size in the deployment,
   or send one typed message.
+
+## Inferred answers and the redesign
+
+### 39. A correct Bitcoin answer was thrown away because the search was not sure
+
+- **When:** 2026-09-30, the eval after adding inferred answers, two runs out
+  of two.
+- **Symptom:** "Can I pay a supplier in Bitcoin?" got "I can't answer that
+  confidently." The knowledge base says cryptocurrency payments are not
+  supported.
+- **Root cause:** the agent's search scored 0.388, just under the 0.39
+  threshold, so the limitations section came back as related, not found.
+  Sonnet read "Cryptocurrency payments" in it and, rightly, called its answer
+  direct. The evidence gate accepts related sections only for an inferred
+  answer, so it failed the reply, the repair did the same, and the decline
+  fallback was spoken.
+- **Fix:** code decides the grounding from the tool log
+  (`effectiveGrounding()` in `gates.ts`): an answer citing a section that
+  came back only as related is said as inferred, with the hedge, whatever the
+  model called it. The search was not sure, so the caller is told, and the
+  answer is not lost. Unit tests in `gates.test.ts` and `turn-runner.test.ts`
+  use the real case.
+
+### 40. The hedge was said twice
+
+- **When:** 2026-09-30, typed questions against the dev server.
+- **Symptom:** "...I can't say for certain whether an exception exists. I'm
+  not completely certain about that, so please confirm it in your RelayPay
+  dashboard..."
+- **Root cause:** the prompt said "the system adds that you are not
+  certain", and the model hedged anyway, in its own words.
+- **Fix:** the prompt and the schema description now say not to. The rerun
+  of the same question had one hedge. It is a prompt instruction, so it can
+  still slip; code does not detect a model-written hedge.
+
+### 41. The hedge came after the closing question
+
+- **When:** 2026-09-30, the Bitcoin eval.
+- **Symptom:** "...Would you like help with another way to pay your
+  supplier? I'm not completely certain about that..." The caller would not
+  know it was their turn.
+- **Root cause:** the hedge was appended after `joinReply()`, which is what
+  puts code's sentences before a closing question (FAILURES 28).
+- **Fix:** the hedge goes through `joinReply()` with the other code
+  sentences. `turn-runner.test.ts` has the real reply.
+
+### 42. The voice orb's animation loop ran on an idle page
+
+- **When:** 2026-09-30, writing up the page's motion.
+- **Symptom:** none visible: `--level` sat at 0. But a frame loop ran 60
+  times a second for as long as the page was open, whether or not a call was
+  live.
+- **Root cause:** the Vapi client is created when the page loads, and the
+  effect started the loop whenever the client existed.
+- **Fix:** the loop starts only while the caller or the assistant can be
+  talking (`listening` or `speaking`). Not measured; read from the code.
+
+### 43. Two eval scenarios passed while the agent never ran
+
+- **When:** 2026-09-30, the knowledge-scenario reruns.
+- **Symptom:** `support_hours` passed in two runs, and `payroll_related` in
+  one, with an SDK cost of $0.0000: the agent had hit the 14 s deadline.
+- **Root cause:** the system-trouble fallback declines and points to the
+  RelayPay dashboard, which is exactly what those two scenarios check for.
+  A scenario that tests a decline cannot tell the agent's decline from the
+  system's.
+- **Fix:** every scenario now also fails if any turn ended in an agent error
+  (`noAgentError` in `evals/scenarios.ts`), and `payroll_related` requires
+  the agent's own reply. Results stored before the change are not re-graded.
+- **Why the deadline was hit:** the machine was running six Claude Code
+  sessions besides the dev server, and the agent's program took 5.6 to 10 s
+  to start (p50 1.4 s this morning). A question the first search misses now
+  costs a second search (DESIGN §8), and with a 1.8 to 1.9 s start those
+  turns ended at 10.3 to 11.1 s, inside the deadline; with a 7.6 to 10 s
+  start they did not. Local numbers; Vercel's are still owed (DESIGN §4).

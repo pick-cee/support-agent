@@ -21,9 +21,39 @@ export function VoiceCall({ publicKey, assistantId, onUseText }: { publicKey: st
   const vapiRef = useRef<Vapi | null>(null);
   const endingRef = useRef(false);
   const callIdRef = useRef<string | null>(null);
+  const orbRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [caption, setCaption] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
+
+  // The orb breathes with whoever is talking. Levels arrive many times a
+  // second, so they go straight to a CSS variable, eased, not through React.
+  // The frame loop runs only while someone can be talking, never on an idle page.
+  useEffect(() => {
+    const vapi = vapiRef.current;
+    const orb = orbRef.current;
+    if (!vapi || !orb || (phase !== "listening" && phase !== "speaking") || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let target = 0;
+    let shown = 0;
+    let frame = 0;
+    const tick = () => {
+      shown += (target - shown) * 0.25;
+      orb.style.setProperty("--level", shown.toFixed(3));
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    const onLevel = (volume: number) => {
+      target = Math.min(1, volume * 2.2);
+    };
+    vapi.on("volume-level", onLevel);
+    vapi.on("local-volume-level", onLevel);
+    return () => {
+      cancelAnimationFrame(frame);
+      vapi.removeListener("volume-level", onLevel);
+      vapi.removeListener("local-volume-level", onLevel);
+      orb.style.setProperty("--level", "0");
+    };
+  }, [phase]);
 
   const loadSummary = useCallback(async () => {
     const id = callIdRef.current;
@@ -115,8 +145,13 @@ export function VoiceCall({ publicKey, assistantId, onUseText }: { publicKey: st
   return (
     <div className={styles.voice}>
       <div className={styles.voiceStage}>
-        <div className={styles.micRing} data-state={phase === "speaking" ? "speaking" : phase === "listening" ? "listening" : inCall ? "busy" : "idle"}>
-          <MicIcon size={30} />
+        <div ref={orbRef} className={styles.orb} data-state={phase === "speaking" ? "speaking" : phase === "listening" ? "listening" : inCall ? "busy" : "idle"}>
+          <span className={styles.orbRing} data-ring="3" aria-hidden="true" />
+          <span className={styles.orbRing} data-ring="2" aria-hidden="true" />
+          <span className={styles.orbRing} data-ring="1" aria-hidden="true" />
+          <span className={styles.orbCore}>
+            <MicIcon size={30} />
+          </span>
         </div>
         <h3 className={styles.voiceHeading}>{PAGE.voice.heading}</h3>
         <p className={styles.voiceBody}>{PAGE.voice.body}</p>

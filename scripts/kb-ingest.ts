@@ -38,8 +38,9 @@ async function main(): Promise<void> {
   }
 
   // Switch versions in one transaction: the old set goes inactive as the new one goes live.
+  // Only the document's chunks: what the team wrote in the console is not part of it.
   await withTransaction(async (client) => {
-    await client.query(`update support_agent.kb_chunks set active = false where active and kb_version <> $1`, [document.kb_version]);
+    await client.query(`update support_agent.kb_chunks set active = false where active and origin = 'document' and kb_version <> $1`, [document.kb_version]);
     await client.query(`update support_agent.kb_chunks set active = true where kb_version = $1`, [document.kb_version]);
   });
 
@@ -48,7 +49,7 @@ async function main(): Promise<void> {
             array_agg(distinct embedding_model) filter (where active) as models,
             count(distinct kb_version)::int as versions,
             count(*) filter (where active and embedding is null)::int as missing
-       from support_agent.kb_chunks`,
+       from support_agent.kb_chunks where origin = 'document'`,
   );
   const row = check.rows[0]!;
   const problems = [

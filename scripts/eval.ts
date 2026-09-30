@@ -65,7 +65,7 @@ async function startMcpServer(deferred: Deferred, mode: "live" | "sandbox"): Pro
 async function load(conversationId: string): Promise<EvalRecord> {
   const [turns, toolCalls, conversation, tickets, escalations, jobs, retrievals] = await Promise.all([
     queryDb<EvalRecord["turns"][number]>(
-      `select turn_index, user_text, spoken_text, answer_type, reply_source, kb_chunk_ids, repaired, fallback_used, status, ttft_ms, total_ms,
+      `select turn_index, user_text, spoken_text, answer_type, reply_source, grounding, kb_chunk_ids, repaired, fallback_used, status, ttft_ms, total_ms,
               cost_estimate_usd::text, gate_results
          from support_agent.conversation_turns where conversation_id = $1 order by turn_index`,
       [conversationId],
@@ -155,7 +155,6 @@ async function main(): Promise<void> {
   const runs = Number(arg("runs") ?? 1);
   const only = arg("only")?.split(",").map((key) => key.trim());
   const mode = process.argv.includes("--live") ? "live" : "sandbox";
-  process.env.SIDE_EFFECTS_MODE = mode;
   const scenarios = SCENARIOS.filter((scenario) => (only ? only.includes(scenario.key) : true) && (process.argv.includes("--phase4") ? scenario.phase4 : true));
   const deferred: Deferred = [];
   const mcp = await startMcpServer(deferred, mode);

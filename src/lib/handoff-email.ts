@@ -1,4 +1,6 @@
+import { EMAIL } from "@/app/copy";
 import { BUSINESS_TIMEZONE } from "@/lib/constants";
+import { renderEmail, type Attachment } from "@/lib/email/template";
 import { speakSlot, zoneSpokenName } from "@/lib/zones";
 
 // The handoff (DESIGN §10.3): everything the specialist needs in one message,
@@ -26,6 +28,7 @@ export type HandoffInput = {
   agentLines: string[];
   toolCalls: { tool_name: string; status: string; result_summary: string | null }[];
   consoleUrl: string | null;
+  manageUrl?: string | null;
 };
 
 function shortTime(iso: string, zone: string): string {
@@ -35,50 +38,65 @@ function shortTime(iso: string, zone: string): string {
   return `${day} ${time} ${zoneSpokenName(zone)}`;
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-export function buildHandoffEmail(input: HandoffInput): { subject: string; text: string; html: string } {
+export function buildHandoffEmail(input: HandoffInput): { subject: string; text: string; html: string; attachments: Attachment[] } {
   const { escalation, customer } = input;
+  const copy = EMAIL.handoff;
   const zone = escalation.timezone ?? BUSINESS_TIMEZONE;
-  const booked = escalation.call_booked && escalation.appointment_time;
-  const subject = [
-    `[Escalation ${escalation.escalation_ref}] ${escalation.category}`,
-    customer?.company_name ?? "unverified caller",
-    booked ? `callback ${shortTime(escalation.appointment_time!, zone)}` : "no callback booked",
-  ].join(" · ");
+  const bookedAt = escalation.call_booked && escalation.appointment_time ? escalation.appointment_time : null;
+  const bookedSpoken = bookedAt ? speakSlot(new Date(bookedAt), zone) : null;
 
-  const sections: [string, string[]][] = [
-    [
-      "Caller",
-      [
-        `Name: ${escalation.user_name}`,
-        `Email: ${escalation.user_email}`,
-        customer ? `Verified as ${customer.customer_id} (${customer.company_name}), ${customer.plan} plan, account ${customer.account_status}, KYC ${customer.kyc_status}` : "Not verified",
-        ...(customer?.support_notes ? [`Support note: ${customer.support_notes}`] : []),
-      ],
-    ],
-    ["Why", [escalation.reason, ...(input.callerLines.length ? ["The caller's last words:", ...input.callerLines.slice(-3).map((line) => `  "${line}"`)] : [])]],
-    ["What we already told them", input.agentLines.length ? input.agentLines.slice(-2).map((line) => `"${line}"`) : ["Nothing recorded."]],
-    ["What we looked up", input.toolCalls.length ? input.toolCalls.map((call) => `${call.tool_name}: ${call.status}${call.result_summary ? `, ${call.result_summary}` : ""}`) : ["No lookups."]],
-    [
-      "Booking",
-      booked
-        ? [`Booked for ${speakSlot(new Date(escalation.appointment_time!), zone)}.`, ...(escalation.cal_booking_uid ? [`Cal.com: https://app.cal.com/booking/${escalation.cal_booking_uid}`] : [])]
-        : [
-            `Not booked: ${escalation.booking_status === "not_requested" ? "no time was chosen on the call" : (escalation.booking_error ?? escalation.booking_status)}.`,
-            ...(escalation.preferred_time_text ? [`The caller asked for: ${escalation.preferred_time_text}`] : []),
-            "Please email the caller to arrange a time.",
-          ],
-    ],
-    ["Ticket", [escalation.ticket_ref]],
-    ["Console", [input.consoleUrl ?? "Not available"]],
-  ];
+  const subject = copy.subject(escalation.escalation_ref, escalation.category, customer?.company_name ?? copy.unverified, bookedAt ? shortTime(bookedAt, zone) : null);
 
-  const text = sections.map(([heading, lines]) => `${heading}\n${lines.join("\n")}`).join("\n\n");
-  const html = sections
-    .map(([heading, lines]) => `<h3 style="margin:16px 0 4px;font-family:sans-serif">${escapeHtml(heading)}</h3>${lines.map((line) => `<div style="font-family:sans-serif">${escapeHtml(line)}</div>`).join("")}`)
-    .join("");
-  return { subject, text, html };
+  const why = escalation.booking_status === "not_requested" ? copy.noTimeChosen : (escalation.booking_error ?? escalation.booking_status);
+  const rendered = renderEmail({
+    preheader: `${escalation.user_name}: ${escalation.reason}`.slice(0, 140),
+    badge: { text: copy.badge(escalation.escalation_ref), tone: "brand" },
+    title: copy.title(customer?.company_name ?? null),
+    intro: bookedSpoken ? copy.introBooked(bookedSpoken) : copy.introNotBooked,
+    blocks: [
+      {
+        kind: "facts",
+        heading: copy.headings.caller,
+        rows: [
+          [copy.labels.name, escalation.user_name],
+          [copy.labels.email, escalation.user_email],
+          [copy.labels.account, customer ? copy.verified(customer.customer_id, customer.company_name, customer.plan, customer.account_status, customer.kyc_status) : copy.notVerified],
+          ...(customer?.support_notes ? ([[copy.labels.note, customer.support_notes]] as [string, string][]) : []),
+        ],
+      },
+      {
+        kind: "facts",
+        heading: copy.headings.why,
+        rows: [
+          [copy.labels.category, escalation.category],
+          [copy.labels.reason, escalation.reason],
+          [copy.labels.ticket, escalation.ticket_ref],
+        ],
+      },
+      ...(input.callerLines.length ? [{ kind: "quotes" as const, heading: copy.headings.said, lines: input.callerLines.slice(-3) }] : []),
+      { kind: "quotes", heading: copy.headings.told, lines: input.agentLines.length ? input.agentLines.slice(-2) : [copy.nothingTold] },
+      {
+        kind: "lines",
+        heading: copy.headings.lookedUp,
+        lines: input.toolCalls.length ? input.toolCalls.map((call) => `${call.tool_name}: ${call.status}${call.result_summary ? `, ${call.result_summary}` : ""}`) : [copy.noLookups],
+      },
+      {
+        kind: "facts",
+        heading: copy.headings.booking,
+        rows: bookedSpoken
+          ? [
+              [copy.labels.status, copy.booked(bookedSpoken)],
+              ...(escalation.cal_booking_uid ? ([[copy.labels.link, `https://app.cal.com/booking/${escalation.cal_booking_uid}`]] as [string, string][]) : []),
+            ]
+          : [
+              [copy.labels.status, copy.notBooked(why)],
+              ...(escalation.preferred_time_text ? ([[copy.labels.asked, escalation.preferred_time_text]] as [string, string][]) : []),
+            ],
+      },
+    ],
+    action: input.consoleUrl ? { label: copy.action, url: input.consoleUrl } : undefined,
+    reason: EMAIL.reasons.escalations,
+    manageUrl: input.manageUrl ?? null,
+  });
+  return { subject, ...rendered };
 }

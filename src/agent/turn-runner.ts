@@ -42,6 +42,8 @@ export type TurnOutcome = {
   answerType: AnswerType | null;
   replySource: "agent" | "fallback" | null;
   confidenceNote: string | null;
+  /** For an answer: stated by the knowledge (direct) or worked out from it (inferred). */
+  grounding: "direct" | "inferred" | null;
   kbChunkIds: string[];
   gateResults: GateResult[];
   repaired: boolean;
@@ -197,7 +199,7 @@ export async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
 
   // The caller moved on. Vapi handles the interruption; nothing more is said.
   if (request.signal.aborted) {
-    return { ...base, status: "interrupted", spokenText: null, answerType: null, replySource: null, confidenceNote: null, kbChunkIds: [], gateResults: [], fallbackUsed: false, error: "interrupted by the caller", errorKind: "aborted", ttftMs, totalMs: since(), speechStripped: null, alerts, nextClarifyStreak: request.clarifyStreak };
+    return { ...base, status: "interrupted", spokenText: null, answerType: null, replySource: null, confidenceNote: null, grounding: null, kbChunkIds: [], gateResults: [], fallbackUsed: false, error: "interrupted by the caller", errorKind: "aborted", ttftMs, totalMs: since(), speechStripped: null, alerts, nextClarifyStreak: request.clarifyStreak };
   }
 
   if (run.error || !run.answer || !checked) {
@@ -208,7 +210,7 @@ export async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
     const done = codeSentences(toolCalls, request.now).sentences;
     const speech = format([...done, done.length ? "" : SPOKEN.systemTrouble].filter(Boolean).join(" "));
     emit(speech.text);
-    return { ...base, status: "error", spokenText: speech.text, answerType: done.length ? "escalate" : "decline", replySource: "fallback", confidenceNote: null, kbChunkIds: [], gateResults: firstResults, fallbackUsed: true, error: `${kind}: ${message}`.slice(0, 1000), errorKind: kind, ttftMs, totalMs: since(), speechStripped: speech.stripped, alerts, nextClarifyStreak: 0 };
+    return { ...base, status: "error", spokenText: speech.text, answerType: done.length ? "escalate" : "decline", replySource: "fallback", confidenceNote: null, grounding: null, kbChunkIds: [], gateResults: firstResults, fallbackUsed: true, error: `${kind}: ${message}`.slice(0, 1000), errorKind: kind, ttftMs, totalMs: since(), speechStripped: speech.stripped, alerts, nextClarifyStreak: 0 };
   }
 
   const { verdict, sentences } = checked;
@@ -220,7 +222,10 @@ export async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
   if (verdict.passed) {
     // The goodbye is fixed and listed in Vapi's endCallPhrases, so a closing reply ends the call.
     const goodbye = run.answer.answer_type === "closing" ? [SPOKEN.goodbye] : [];
-    text = [joinReply(verdict.text, sentences), ...goodbye].filter(Boolean).join(" ");
+    // An answer worked out rather than stated by the knowledge, or resting on a section under the
+    // threshold, says so in code's words (DESIGN §8), before any closing question so the reply still ends on it.
+    const hedge = verdict.grounding === "inferred" && verdict.text ? [SPOKEN.inferredHedge] : [];
+    text = [joinReply(verdict.text, [...sentences, ...hedge]), ...goodbye].filter(Boolean).join(" ");
     answerType = run.answer.answer_type;
     replySource = "agent";
     // A closing reply whose words were all sign-off is just the goodbye; anything else left empty declines.
@@ -247,6 +252,7 @@ export async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
     answerType,
     replySource,
     confidenceNote: run.answer.confidence_note,
+    grounding: replySource === "agent" && answerType === "answer" ? verdict.grounding : null,
     kbChunkIds: replySource === "agent" ? run.answer.kb_chunk_ids : [],
     gateResults: results,
     fallbackUsed: replySource === "fallback",

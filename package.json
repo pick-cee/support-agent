@@ -25,11 +25,7 @@
     "evidence": "tsx --conditions=react-server scripts/evidence-table.ts",
     "console:password": "tsx scripts/console-password.ts",
     "cal:setup": "tsx --conditions=react-server scripts/cal-setup.ts",
-    "vapi:sync": "tsx --conditions=react-server scripts/vapi-sync.ts",
-    "phase0:probe": "tsx --conditions=react-server scripts/phase0-probe.ts",
-    "phase0:report": "tsx --conditions=react-server scripts/phase0-report.ts",
-    "phase0:simulate": "tsx scripts/phase0-simulate-call.ts",
-    "phase5:check": "tsx --conditions=react-server scripts/phase5-live-check.ts"
+    "vapi:sync": "tsx --conditions=react-server scripts/vapi-sync.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.284",

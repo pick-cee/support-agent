@@ -26,7 +26,7 @@ const ROWS: { key: string; testCase: string; notes: string }[] = [
     key: "escalation",
     testCase: "Human Escalation",
     notes:
-      "Email read-back was blocked by the email gate until FAILURES 18 was fixed. Real Cal.com booking and handoff email proven by npm run phase5:check. When a benchmark run missed it, the confirmation turn hit the 14 s deadline after a slow program start and a second slot check (FAILURES 36, 37); the caller heard the fallback, not silence.",
+      "Email read-back was blocked by the email gate until FAILURES 18 was fixed. Real Cal.com booking and handoff email proven on 2026-09-29 by a one-off live check (DESIGN §20), since removed with the other one-off scripts. When a benchmark run missed it, the confirmation turn hit the 14 s deadline after a slow program start and a second slot check (FAILURES 36, 37); the caller heard the fallback, not silence.",
   },
   {
     key: "unsupported",

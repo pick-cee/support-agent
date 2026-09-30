@@ -79,16 +79,20 @@ export async function raiseAlert(alert: AlertInput): Promise<void> {
   }
 }
 
+/**
+ * The database is down, so the alert cannot be recorded and the recipient list
+ * cannot be read: it goes to whoever was on the list the last time this server
+ * read it. A server that started while the database was down knows nobody, and
+ * the Vercel log is then the only record (DESIGN §10.4).
+ */
 async function sendDirect(alert: AlertInput): Promise<void> {
   try {
-    const { sendEmail, supportInbox } = await import("@/lib/resend");
-    await sendEmail({
-      to: supportInbox(),
-      subject: `[RelayPay alert] ${alert.severity}: ${alert.type} (database unreachable)`,
-      text: `${alert.message}\n\nThe database could not record this alert, so it was sent directly.`,
-      html: `<p>${alert.message.replace(/</g, "&lt;")}</p><p>The database could not record this alert, so it was sent directly.</p>`,
-      idempotencyKey: `direct:${alert.fingerprint}:${Math.floor(Date.now() / (ALERT_RENOTIFY_MINUTES * 60_000))}`,
-    });
+    const [{ sendEmail }, { lastKnownRecipientsFor }, { buildAlertEmail }] = await Promise.all([import("@/lib/resend"), import("@/lib/notifications"), import("@/lib/email/notices")]);
+    const to = lastKnownRecipientsFor(alert.severity === "critical" ? "critical_alerts" : "warning_alerts");
+    if (!to.length) throw new Error("no recipients known while the database is unreachable");
+    const now = new Date().toISOString();
+    const email = buildAlertEmail({ ...alert, context: alert.context ?? {}, occurrences: 1, first_seen: now, last_seen: now }, { consoleUrl: null, manageUrl: null }, true);
+    await sendEmail({ to, ...email, idempotencyKey: `direct:${alert.fingerprint}:${Math.floor(Date.now() / (ALERT_RENOTIFY_MINUTES * 60_000))}` });
   } catch (error) {
     console.error(JSON.stringify({ event: "alert_not_delivered", fingerprint: alert.fingerprint, error: error instanceof Error ? error.message : String(error) }));
   }

@@ -1,45 +1,34 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 
-import { CONSOLE, PAGE } from "@/app/copy";
-import { InfoIcon } from "@/app/icons";
+import { CONSOLE } from "@/app/copy";
+import { WarningIcon } from "@/app/icons";
 import { requireConsoleSession } from "@/lib/console/auth";
-import { alertsUndelivered } from "@/lib/console/queries";
+import { lagosToday } from "@/lib/console/format";
+import { alertsUndelivered, navCounts } from "@/lib/console/queries";
+import { coverage } from "@/lib/notifications";
 
 import styles from "../console.module.css";
-import { ConsoleNav } from "../nav";
+import { ConsoleShell } from "../shell";
 
 export const metadata: Metadata = { title: CONSOLE.title, robots: { index: false } };
 
 export default async function ConsoleLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   await requireConsoleSession();
-  const undelivered = await alertsUndelivered();
+  const [undelivered, counts, reach] = await Promise.all([alertsUndelivered(), navCounts(), coverage()]);
+  const nobodyForAlerts = reach.critical_alerts === 0 && reach.warning_alerts === 0;
+  // DESIGN §10.4: when the alert channel itself is broken, the console says so in red, and why.
+  const banner =
+    undelivered > 0 ? (
+      <div className={styles.banner} role="alert">
+        <WarningIcon size={18} />
+        {nobodyForAlerts ? CONSOLE.undelivered.noRecipients : CONSOLE.undelivered.failed(undelivered)}
+        {nobodyForAlerts && <Link href="/console/settings">{CONSOLE.undelivered.action}</Link>}
+      </div>
+    ) : null;
   return (
-    <div className={styles.shell}>
-      <header className={styles.bar}>
-        <div className={styles.barInner}>
-          <Link href="/console" className={styles.brand}>
-            <Image src="/brand/relaypay-logo.png" alt={PAGE.logoAlt} width={120} height={28} priority />
-            <span className={styles.product}>{CONSOLE.product}</span>
-          </Link>
-          <ConsoleNav />
-          <form method="post" action="/api/console/logout" className={styles.logout}>
-            <button type="submit" className={styles.linkButton}>
-              {CONSOLE.nav.logout}
-            </button>
-          </form>
-        </div>
-      </header>
-      {undelivered > 0 && (
-        <div className={styles.banner} role="alert">
-          <div className={styles.bannerInner}>
-            <InfoIcon size={18} />
-            {CONSOLE.undeliveredBanner(undelivered)}
-          </div>
-        </div>
-      )}
-      <main className={styles.main}>{children}</main>
-    </div>
+    <ConsoleShell counts={counts} today={lagosToday()} healthy={counts.alerts === 0} alerts={counts.alerts} banner={banner}>
+      {children}
+    </ConsoleShell>
   );
 }

@@ -7,7 +7,7 @@ import { queryDb } from "@/lib/db";
 import { appBaseUrl, requireEnv } from "@/lib/env";
 import { systemClock } from "@/lib/time";
 import { createMcpHttp } from "@/mcp/http";
-import { sideEffectsMode, supabaseServices } from "@/mcp/services";
+import { supabaseServices } from "@/mcp/services";
 import { supabaseRepository } from "@/mcp/supabase-repository";
 
 export const runtime = "nodejs";
@@ -15,7 +15,7 @@ export const maxDuration = 30;
 
 const handle = createMcpHttp({
   repository: supabaseRepository,
-  services: (defer) => supabaseServices(sideEffectsMode(), defer),
+  services: (defer) => supabaseServices("live", defer),
   token: () => requireEnv("MCP_AGENT_TOKEN"),
   allowedHostnames: () => [new URL(appBaseUrl()).hostname],
   clock: systemClock,

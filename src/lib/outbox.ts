@@ -5,8 +5,10 @@ import { calCreateBooking, CalError, calFindBooking, type CalConfig } from "@/li
 import { JOB_BACKOFF_MINUTES, JOB_MAX_ATTEMPTS, OUTBOX_BATCH_SIZE } from "@/lib/constants";
 import { queryDb } from "@/lib/db";
 import { appBaseUrl, optionalEnv } from "@/lib/env";
+import { buildAlertEmail } from "@/lib/email/notices";
 import { buildHandoffEmail } from "@/lib/handoff-email";
-import { sendEmail, supportInbox } from "@/lib/resend";
+import { recipientsFor } from "@/lib/notifications";
+import { sendEmail } from "@/lib/resend";
 
 // The outbox (DESIGN §10.1). A job is claimed by one statement that moves it
 // to running, so two workers never run the same job, and that is safe on the
@@ -15,7 +17,16 @@ import { sendEmail, supportInbox } from "@/lib/resend";
 
 export type SideEffectsMode = "live" | "sandbox";
 
-type Job = { id: string; kind: "book_callback" | "notify_escalation" | "notify_alert"; ref_id: string; payload: Record<string, unknown>; attempts: number; last_error: string | null };
+type Job = {
+  id: string;
+  kind: "book_callback" | "notify_escalation" | "notify_alert";
+  ref_id: string;
+  payload: Record<string, unknown>;
+  attempts: number;
+  last_error: string | null;
+  /** The escalation belongs to an eval conversation: never booked or emailed, whoever runs the job. */
+  for_eval: boolean;
+};
 
 /** A failure that no retry will fix (missing configuration, a slot someone else took). */
 class FinalError extends Error {}
@@ -136,6 +147,20 @@ async function notifyEscalation(job: Job, mode: SideEffectsMode): Promise<void> 
         [escalation.conversation_id],
       )).rows
     : [];
+  // Nobody to tell is a setup problem, not a passing fault: retrying cannot fix it.
+  // The escalation says why, and the console shows it until someone is added.
+  const to = await recipientsFor("escalations");
+  if (!to.length) {
+    await queryDb(`update support_agent.escalations set notification_status = 'failed', notification_error = 'nobody is set to receive escalation emails', updated_at = now() where id = $1`, [escalation.id]);
+    await raiseAlert({
+      type: "notification_failed",
+      severity: "critical",
+      fingerprint: "notification_failed:no_recipients",
+      message: `${escalation.escalation_ref} was not emailed: nobody is set to receive escalation emails. Add someone in the console's Settings.`,
+      context: { escalation_ref: escalation.escalation_ref },
+    });
+    return;
+  }
   const email = buildHandoffEmail({
     escalation,
     customer,
@@ -143,9 +168,10 @@ async function notifyEscalation(job: Job, mode: SideEffectsMode): Promise<void> 
     agentLines: turns.map((turn) => turn.spoken_text ?? "").filter(Boolean),
     toolCalls,
     consoleUrl: escalation.conversation_id ? `${appBaseUrl()}/console/conversations/${escalation.conversation_id}` : null,
+    manageUrl: `${appBaseUrl()}/console/settings`,
   });
-  await sendEmail({ to: supportInbox(), ...email, idempotencyKey: `escalation:${escalation.id}` });
-  await queryDb(`update support_agent.escalations set notification_status = 'sent', updated_at = now() where id = $1`, [escalation.id]);
+  await sendEmail({ to, ...email, idempotencyKey: `escalation:${escalation.id}` });
+  await queryDb(`update support_agent.escalations set notification_status = 'sent', notification_error = null, updated_at = now() where id = $1`, [escalation.id]);
 }
 
 async function notifyAlert(job: Job): Promise<void> {
@@ -156,19 +182,11 @@ async function notifyAlert(job: Job): Promise<void> {
     )
   ).rows[0];
   if (!alert) return;
-  const lines = [
-    alert.message,
-    `Type: ${alert.type}. Severity: ${alert.severity}. Seen ${alert.occurrences} time(s), first ${alert.first_seen}, last ${alert.last_seen}.`,
-    `Context: ${JSON.stringify(alert.context).slice(0, 1500)}`,
-    `Console: ${appBaseUrl()}/console/alerts`,
-  ];
-  await sendEmail({
-    to: supportInbox(),
-    subject: `[RelayPay alert] ${alert.severity}: ${alert.type}`,
-    text: lines.join("\n\n"),
-    html: lines.map((line) => `<p style="font-family:sans-serif">${line.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`).join(""),
-    idempotencyKey: String(job.payload.idempotency_key ?? job.id),
-  });
+  const to = await recipientsFor(alert.severity === "critical" ? "critical_alerts" : "warning_alerts");
+  // Nobody to email: the alert stays undelivered, and the console's banner says so and why.
+  if (!to.length) return;
+  const email = buildAlertEmail(alert, { consoleUrl: `${appBaseUrl()}/console/alerts`, manageUrl: `${appBaseUrl()}/console/settings` });
+  await sendEmail({ to, ...email, idempotencyKey: String(job.payload.idempotency_key ?? job.id) });
   await queryDb(`update support_agent.alerts set notified_at = now() where id = $1`, [alert.id]);
 }
 
@@ -201,7 +219,10 @@ async function finish(job: Job, error: unknown): Promise<void> {
   }
 }
 
-async function runOne(job: Job, mode: SideEffectsMode): Promise<void> {
+async function runOne(job: Job, requested: SideEffectsMode): Promise<void> {
+  // An eval job left pending (its sandboxed inline attempt failed) must not be
+  // booked or emailed for real when a live worker picks it up later.
+  const mode: SideEffectsMode = job.for_eval ? "sandbox" : requested;
   let error: unknown = null;
   try {
     if (job.kind === "book_callback") await bookCallback(job, mode);
@@ -213,7 +234,9 @@ async function runOne(job: Job, mode: SideEffectsMode): Promise<void> {
   await finish(job, error);
 }
 
-const CLAIM_COLUMNS = "id, kind, ref_id, payload, attempts, last_error";
+const CLAIM_COLUMNS = `id, kind, ref_id, payload, attempts, last_error,
+  exists (select 1 from support_agent.escalations e join support_agent.conversations c on c.id = e.conversation_id
+           where e.id::text = jobs.ref_id::text and c.channel = 'eval') as for_eval`;
 
 /** Runs these jobs now, once each, if they are still pending. Used inline by create_escalation and raiseAlert. */
 export async function runJobsNow(ids: string[], mode: SideEffectsMode): Promise<void> {

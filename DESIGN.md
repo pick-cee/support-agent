@@ -68,8 +68,9 @@ Supabase (§9).
 Its "Backend Escalation Requirements" section says the system must **book the
 support appointment via a calendar** and **notify a support channel** ("Slack,
 Telegram, Email etc."), as well as create the record and log it for audit.
-Decision: Cal.com for booking, Resend email to the support inbox for
-notification. Both are required behaviour, not extras.
+Decision: Cal.com for booking, Resend email to the support team for
+notification, sent to the people listed in the console's Settings page
+(§10.3). Both are required behaviour, not extras.
 
 **2.4 Escalation categories.** The Google Doc lists compliance / account /
 dispute / other. The repo copy adds payment. We accept all five.
@@ -169,7 +170,7 @@ Caller (browser, @vapi-ai/web)          Caller (phone, optional)
        3. cheap input checks          7. format for speech, stream
        4. open SSE, filler if slow    8. write the turn record
                               |
-            Claude Agent SDK  (Haiku 4.5, no built-in tools)
+            Claude Agent SDK  (Sonnet 5.5, no built-in tools)
                               |  MCP over Streamable HTTP, bearer token,
                               |  per-turn conversation headers
                               v
@@ -181,13 +182,24 @@ Caller (browser, @vapi-ai/web)          Caller (phone, optional)
      Supabase Postgres, schema support_agent  (pgvector, pg_cron, pg_net)
                               |
      Outbox worker  /api/cron/outbox  (inline first try, pg_cron every minute)
-        -> Cal.com booking      -> Resend email to the support inbox
+        -> Cal.com booking      -> Resend email to the Settings recipients
 
 POST /api/vapi/events        status-update, end-of-call-report, hang
-/                            RelayPay voice page
-/console                     escalations, conversations, knowledge gaps, alerts, evals
+POST /api/chat               typed messages, the same turn runner
+/                            RelayPay support page: voice or typing
+/console                     today, escalations, conversations, knowledge, alerts, evals, settings
 npm run eval                 scenarios through the same turn runner, text mode
 ```
+
+**Migrations run on start.** `src/instrumentation.ts` runs any pending
+migration when the server starts (`next dev`, `next start`, or a Vercel cold
+start), through `runMigrations()` in `src/lib/migrations.ts`, the same code
+`npm run db:migrate` uses. When everything is applied it is one query and
+takes no lock. Otherwise it takes a session advisory lock on a session-mode
+connection, so two instances starting together never apply the same file
+twice, and applies each pending file in its own transaction. An applied file
+whose checksum changed stops it with an error. A failure is logged and never
+stops the server: the page still answers, and the next start tries again.
 
 **Hosting.** Everything is one Next.js app on Vercel Hobby, with Supabase as
 the only database. Vercel Hobby cron only runs once a day, so the outbox is
@@ -324,9 +336,14 @@ fallback for that answer type is spoken.
 	"spoken_text": "string, at most SPOKEN_TEXT_MAX_CHARS characters",
 	"kb_chunk_ids": ["chunk ids from search_knowledge_base in THIS turn"],
 	"confidence_note": "one short sentence: what this rests on, or what is uncertain",
+	"grounding": "direct | inferred",
 	"needs_human": false
 }
 ```
+
+`grounding` matters only for `answer`: `direct` when a chunk states the
+answer, `inferred` when it follows from the chunks without being stated. Code
+adds the hedge to an inferred answer (§8).
 
 The model writes `spoken_text`. It does **not** write reference numbers,
 booked times or email addresses it read from a tool. Those are appended by code
@@ -340,7 +357,7 @@ message stream (the `tool_result` blocks); the model cannot write to it.
 
 | Check                                  | Rule                                                                                                                                                                                                                                                                                                                                                           | On failure                                                |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| **Evidence for the answer type**       | `answer` needs a `search_knowledge_base` call this turn with `found: true`, and every cited id must be one it returned. `lookup_result` needs a successful `lookup_*` call this turn. `ticket_created` needs a successful `create_support_ticket` this turn. `escalate` needs a successful `create_escalation` this turn or an already escalated conversation. | Repair once, else decline and offer a specialist.         |
+| **Evidence for the answer type**       | `answer` needs a `search_knowledge_base` call this turn with `found: true`, and every cited id must be one it returned. An `inferred` answer may instead rest on the `related` sections a search returned; an answer citing one is treated as inferred whatever the model called it, and gets the hedge (§8). `lookup_result` needs a successful `lookup_*` call this turn. `ticket_created` needs a successful `create_support_ticket` this turn. `escalate` needs a successful `create_escalation` this turn or an already escalated conversation. | Repair once, else decline and offer a specialist.         |
 | **Questions end in a question**        | `clarify` and `collect_details` must ask a question. Code moves the last question to the end, and keeps it when a long reply is trimmed, so the caller hears the question last (§20). Nothing is reworded.                                                                                                                                                  | Repair once, else a fixed clarifying question.            |
 | **Numbers must come from evidence**    | Every digit in `spoken_text`, and every number word from one to thirty that sits beside a unit (days, hours, percent, a currency, am/pm) or beside another number, must appear in a chunk retrieved this turn, a tool result from this turn, or something the caller said. This is what stops an invented fee or an invented "3 business days", without blocking "one moment" or "one of our specialists". | Repair once, else decline.                                |
 | **No email the caller didn't say**     | Any email address in `spoken_text` must have been said by the caller in this conversation.                                                                                                                                                                                                                                                                     | Remove and repair.                                        |
@@ -403,6 +420,9 @@ still hears the question last:
   passed, and it's still processing." A payout past its scheduled date gets
   the same treatment: "The payout was scheduled for 18 August, which has
   passed, and it's still processing."
+- Inferred answer: "I'm not completely certain about that, so please confirm
+  it in your RelayPay dashboard, or I can arrange for a specialist to check."
+  (§8).
 - Closing: every `closing` reply ends with "Goodbye, and thanks for calling
   RelayPay.", which is the assistant's `endCallPhrases` entry, so the call
   ends on it. A typed conversation ends with "Thanks for contacting RelayPay
@@ -692,6 +712,93 @@ in scope and 9 out):
   precision 0.950, recall 0.528. Full text alone misses paraphrases, which is
   why it is the fallback, not the default.
 
+**Remeasured on 2026-09-30** with 82 questions (73 in scope, 9 out), after
+adding one customer-worded question per section (below): 0.39 is still the
+best F0.5, at precision 0.926 and recall 0.875. The threshold did not move.
+
+**Every section is measured.** The retrieval set has one question per section
+of the knowledge base (kind `coverage`, 37 questions), worded the way a
+customer would ask, not the way the heading reads. For each, the expected
+section's own score:
+
+- 32 of 37 score at or above 0.39. In five of those a neighbouring section
+  ranks first. For verification time, risk reviews, invoice tracking and
+  instant payouts the expected section is still among the four returned (at
+  rank 2 or 3). For the product overview it ranks 13th, and "What Is
+  RelayPay?" (0.705) answers the question instead.
+- 2 score between 0.30 and 0.39, so they come back as related (below):
+  "Can I give my accountant their own login?" (0.369) and "Can I save my
+  contractors' bank details for next time?" (0.382).
+- 3 score under 0.30, each with another section in the related band: "Why
+  won't support give me a firm date for a fix?", "What do I have to do before
+  I can use every feature?" and "Can I send money to a friend personally?".
+
+End to end, typed, with Sonnet 5.5 on 2026-09-30, those five all got a
+truthful reply. The agent's second search, in its own words, found the
+beneficiary answer (0.514) and the onboarding answer (0.676). The friend
+question became "No, RelayPay doesn't support consumer-to-consumer transfers"
+once the prompt named that formal term as an example (see the limit in §19).
+The accountant question became a hedged inference. The "firm date" question
+became a clarifying question. So: every section can be reached, but not every
+wording finds it, and a miss becomes a hedge, a question or a decline, never a
+guess.
+
+**Answers the knowledge implies, said as such.** Akin asked for the agent to
+work out answers from what it knows, and to say when it isn't sure (§20).
+
+- When nothing clears the threshold, `search_knowledge_base` also returns
+  up to `RELATED_TOP_K` `related` sections scoring at least
+  `RELATED_MIN_SCORE` (0.30; `MEMORY_RELATED_MIN_SCORE` 2.5 on full text).
+  Under that floor a hit is noise and nothing comes back.
+- The tool's message says: search once more in different words first, then,
+  if a related section lets you work the answer out, answer with
+  `grounding: "inferred"`; otherwise decline. The second search costs a model
+  round trip. Measured locally: two-search turns ended at 10.3 to 11.1 s with
+  a normal program start (1.8 to 1.9 s), inside the 14 s voice deadline, and
+  missed it when the program took 7.6 s or more to start (FAILURES 43).
+- The structured answer carries `grounding`, `direct` or `inferred` (§6.2),
+  but code decides what is said from the tool log, not from the label
+  (`effectiveGrounding()` in `gates.ts`). An answer citing any section that
+  came back only as related is inferred, whatever the model called it: the
+  search was not sure, so the caller is told. Sonnet read "Cryptocurrency
+  payments" in the related limitations section, rightly called it direct,
+  and was rejected twice, so the caller heard a decline to a question the
+  knowledge answers (FAILURES 39). The evidence gate accepts related
+  sections only for an inferred answer (§6.3).
+- Code, not the model, appends `SPOKEN.inferredHedge` to an inferred answer,
+  before any closing question: "I'm not completely certain about that, so
+  please confirm it in your RelayPay dashboard, or I can arrange for a
+  specialist to check." The prompt tells the model not to hedge in its own
+  words, because it did, and the reply hedged twice.
+- Never inferred: a number, a date, a fee, a timeline, or anything about the
+  caller's own account. The number gate still applies.
+- `conversation_turns.grounding` records it (migration `0007`), and the
+  console marks an inferred reply.
+
+**Knowledge the team adds.** The agent does not rewrite its own knowledge: a
+support agent that teaches itself from its own guesses would repeat them with
+more confidence each time. It learns through the people who read its gaps:
+
+- The console's Knowledge page lists the latest 500 questions the agent
+  declined or found nothing for, grouped by the nearest section the search
+  returned (or "no match"), with a count and up to five example questions.
+  Eval runs are included, because they ask the questions the knowledge base
+  is known not to cover. "Answer this" opens a form with the question filled
+  in.
+- An answer the team writes is saved to `team_knowledge` and, in the same
+  transaction, embedded into `kb_chunks` with `origin: 'team'`, source title
+  "Support team answers". The embedding runs first, so a failed embedding
+  saves nothing. The agent finds it through the same search, cites it, and
+  it goes through the same gates. It is approved knowledge because a person
+  wrote it.
+- A service notice ("GBP payouts are running a day late") is the same, with
+  an end date. `search_kb` leaves out expired rows (migration `0007`), so an
+  old notice can't be spoken after it ends.
+- Switching an entry off takes it out of search at once. It is kept, so old
+  retrieval logs still resolve. Re-ingesting the document touches only
+  `origin: 'document'` rows.
+- Each entry shows how many answers have cited it.
+
 **Degraded mode.** If the embedding call fails, search runs on full text only.
 The retrieval log is marked `degraded: true` and a warning alert is raised. If
 that also fails, the tool returns `found: false` and the agent declines.
@@ -825,6 +932,22 @@ below.
   `source_summary`
 - `embedding vector(1536)`, `embedding_model`
 - `fts tsvector` (generated), `active`
+- `origin`: `document` or `team`; `expires_at` for a service notice
+  (migration `0007`)
+
+**`team_knowledge`** (migration `0007`, §8)
+
+- `kind`: `answer` or `notice`; `title` (3 to 200 characters), `body` (3 to
+  2000), `source_question`, `expires_at`, `active`
+- `chunk_id` unique: the `kb_chunks` row that makes it searchable
+
+**`notification_recipients`** (migration `0006`, §10.3)
+
+- `email` (unique ignoring case), `name`
+- `escalations`, `critical_alerts`, `warning_alerts`, `active`
+
+`escalations` gained `notification_error` (`0006`), and `conversation_turns`
+gained `grounding` (`0007`).
 
 **`eval_runs`**
 
@@ -868,7 +991,9 @@ so the handoff email reports the booking's real outcome and the caller never
 waits on Resend. The escalation tool's own deadline is
 `ESCALATION_TOOL_TIMEOUT_MS`, and the agent's MCP timeout sits above it.
 
-`SIDE_EFFECTS_MODE=sandbox` (the eval runner) still reads real slots, but books
+The app is always live, on localhost as on Vercel: a typed or spoken
+escalation books a real Cal.com slot and sends real email (§20). Only the eval
+runner sandboxes, unless given `--live`: it still reads real slots, but books
 nothing and emails no one. Those jobs finish as `skipped_eval`, so an eval run
 leaves the same rows a live one would.
 
@@ -876,6 +1001,16 @@ Whatever fails stays `pending`:
 
 - `/api/cron/outbox` retries it with backoff (1, 2, 4, 8, 16, 32 minutes),
   called every minute by Supabase `pg_cron` and `pg_net`.
+- Off Vercel (`next dev`, `next start` on a server), pg_cron cannot reach the
+  app, so the server runs the same worker itself every
+  `OUTBOX_LOCAL_INTERVAL_MS`, started from `src/instrumentation.ts`
+  (`runOutbox()` in `src/lib/outbox-worker.ts`, shared with the route). It
+  retries jobs, sends alert emails and closes idle typed conversations on
+  localhost exactly as pg_cron does once deployed. Jobs are claimed with
+  `for update skip locked`, so it is safe beside pg_cron.
+- A job for an eval conversation always runs sandboxed, whoever runs it. An
+  eval job whose sandboxed inline attempt failed would otherwise have been
+  booked and emailed for real by the next live worker, local or pg_cron.
 - After `JOB_MAX_ATTEMPTS` the job is `dead` and a critical alert goes out.
 
 Reserve, then act, then confirm. The escalation exists before anything is sent
@@ -905,14 +1040,44 @@ one.
   caller, if still on the line, hears "A specialist will email you to arrange
   a time."
 
-### 10.3 Notifying the support inbox with Resend
+### 10.3 Notifying the support team with Resend
 
-- To `SUPPORT_INBOX_EMAIL`, from `RESEND_FROM_EMAIL`. The variable is a
-  comma-separated list: every admin inbox listed gets every handoff and alert.
-  The Resend account has a verified sending domain, so any recipient works.
-  Without one, Resend delivers only to the account owner's address.
+**Who gets what** is data, not configuration: the `notification_recipients`
+table (migration `0006`), managed in the console's Settings page (§14). It
+replaced the `SUPPORT_INBOX_EMAIL` variable (§20).
+
+- Each person has an email, an optional name, and three switches: escalation
+  handoffs, critical alerts, warnings. New people get escalations and critical
+  alerts, not warnings. A person can be paused without being removed.
+- Addresses are unique ignoring case (a unique index on `lower(email)`).
+- "Send a test" sends that person the test email, listing what they are
+  signed up for.
+- **Nobody set for escalations** is a failure, not a silent skip: the
+  escalation's `notification_status` is `failed` with `notification_error`
+  "nobody is set to receive escalation emails", a critical
+  `notification_failed` alert is raised, and the console shows a banner until
+  someone is added. The escalation, ticket and booking are unaffected.
+- Nobody set for an alert's severity: the alert stays in the console and is
+  not emailed.
+- From `RESEND_FROM_EMAIL`. The Resend account has a verified sending domain,
+  so any recipient works. Without one, Resend delivers only to the account
+  owner's address.
 - Each send carries an `Idempotency-Key` (the job's id), so a retried job
   doesn't send twice.
+
+**One template for every email** (`src/lib/email/template.ts`): the handoff,
+alerts and the test email.
+
+- The logo at the top, attached inline (`cid:relaypay-logo`, a 320 × 75 PNG at
+  `public/brand/relaypay-logo-email.png`) rather than linked, so it shows
+  without the mail client loading remote images.
+- A white card on the off-white page, a 4 px deep-blue rule on top, a toned
+  label (escalation, critical, warning, test), the title, a short lead, then
+  blocks of facts, lines or quotes, and one button to the console.
+- A footer saying why the reader got it, with a link to Settings to change it.
+- Table layout and inline styles, 600 px wide, because mail clients ignore
+  most CSS. Every email has a plain-text part with the same content.
+- All strings in `copy.ts` (`EMAIL`); everything interpolated is escaped.
 - Subject: `[Escalation E-2093] account · LagosLedger · callback Tue 6 Oct 14:00 WAT`.
 - Body, in this order:
   - **Caller:** name, email, and "verified as CUS-1001" or "not verified".
@@ -938,14 +1103,20 @@ Alert types:
 - `agent_error`, `agent_timeout`, `agent_limit`
 - `mcp_unreachable`, `tool_error`, `retrieval_degraded`
 - `booking_failed`, `notification_failed`, `job_dead`
-- `budget_exceeded`, `vapi_hang`
+- `budget_exceeded`, `vapi_hang`, `rate_limited`
 - `gate_fallback`: only when a fallback was spoken, not when a repair
   succeeded.
 
+Critical alerts go to everyone with critical alerts switched on, warnings to
+everyone with warnings on (§10.3).
+
 **When the alert channel is itself broken.**
 
-- **Database down:** the outbox can't be written, so `raiseAlert` sends
-  directly through Resend and logs with `console.error`.
+- **Database down:** the outbox can't be written, and neither can the
+  recipient list be read, so `raiseAlert` sends directly through Resend to
+  whoever was on the list the last time this server read it, and logs with
+  `console.error`. A server that has never read the list since it started
+  has nobody to send to, and says so in its log.
 - **Resend down:** alerts stay in the table, the console shows a red "alerts
   not delivered" banner, and Vercel logs carry the error.
 
@@ -1035,8 +1206,9 @@ the account's balance.
 
 Log one real payload, with personal data redacted, into
 `docs/vapi-payload-sample.json`. The first request of each call records its
-path and redacted shape as a `vapi_payload_sample` event, and
-`npm run phase0:report` writes the latest real one to that file. Any other
+path and redacted shape as a `vapi_payload_sample` event, where the latest
+real one can be read (the one-off `phase0:report` script that copied it into
+the file was removed with the other Phase 0 scripts, §20). Any other
 path Vapi calls under `/api/vapi` lands in a catch-all route that answers 404
 and raises a critical alert naming the path.
 
@@ -1132,10 +1304,11 @@ instead of speaking. It is the same product, not a second one:
   closes any typed conversation idle for `TEXT_IDLE_CLOSE_MINUTES`, so a
   customer who left mid-escalation still gets a follow-up ticket.
 - **Not chat bubbles.** The conversation is a transcript: each turn a
-  labelled block with a quiet rule (accent for the assistant, grey for the
-  customer). Before the first message, three suggested questions from the
-  test scenarios. A failed send puts the message back in the box, so nothing
-  typed is lost.
+  labelled block with a small round avatar (the RelayPay mark for the
+  assistant, a person icon for the customer) and a quiet rule (accent for the
+  assistant, grey for the customer), all on the left. Before the first
+  message, three suggested questions from the test scenarios. A failed send
+  puts the message back in the box, so nothing typed is lost.
 - **Voice not configured** (no assistant id on this deployment): the page
   opens on typing, and the voice tab says so plainly with a button to type
   instead.
@@ -1157,8 +1330,22 @@ instead of speaking. It is the same product, not a second one:
   - status and the typed transcript in `aria-live` regions
   - colour never the only signal
   - works at 360 px wide with no sideways scroll (checked at 390 px in Edge)
-  - motion only while a call is live or a reply is on its way, and none under
-    `prefers-reduced-motion`
+  - none of the motion below under `prefers-reduced-motion` (one rule in
+    `globals.css`, and the orb's frame loop does not start)
+- **Motion, added 2026-09-30 at Akin's request (§20).** Calm, short and
+  purposeful, never decorative for its own sake:
+  - on load, the heading, points and card rise into place once, staggered
+    by 60 ms, in about half a second
+  - an "Available now" label with a slow accent ping, the page's one
+    continuous motion
+  - the voice orb: three rings around the microphone that grow with the
+    volume of whoever is talking (Vapi's `volume-level` and
+    `local-volume-level` events, eased into a CSS variable, not through
+    React), accent while the customer talks and deep blue while the assistant
+    does, a slow breath while connecting, still when idle. The frame loop runs
+    only while a call is live.
+  - each new transcript entry rises in; the "Checking" dots pulse while a
+    typed reply is on its way
 - **Environment:** `NEXT_PUBLIC_VAPI_PUBLIC_KEY` and
   `NEXT_PUBLIC_VAPI_ASSISTANT_ID` are the only public variables in the app.
 
@@ -1180,17 +1367,34 @@ per-person accounts: the audit row records that the console changed a status,
 not who did.
 
 The console's writes are route handlers under `/api/console` (login, logout,
-escalation status), each checking the session and that the request came from
-the console's own origin. Pages live in a route group behind one layout that
-checks the session, and an unauthenticated request is redirected to the login
-page with nothing of the page rendered.
+escalation status, notification recipients and their test email, team
+knowledge), each checking the session and that the request came from the
+console's own origin, and answering JSON. Pages live in a route group behind
+one layout that checks the session, and an unauthenticated request is
+redirected to the login page with nothing of the page rendered.
 
 **Scannable first.** Week 2's feedback was that a founder had to read too much
 before understanding anything. Every view leads with numbers and status, and
 the detail is one click away. The same design tokens as the customer page:
-white cards on off-white, the current section underlined in the accent, and
-status colour only on pills that always carry words (resolved green, escalated
-amber, failed red, ticket blue).
+white cards on off-white, and status colour only on pills that always carry
+words and a dot (resolved green, escalated amber, failed red, ticket blue).
+
+**Layout (redesigned 2026-09-30, §20).**
+
+- A fixed sidebar with the logo, navigation in four groups (Overview, Work,
+  Improve, System) with an icon beside every label, and live counts on
+  Escalations (open, customer only) and Alerts. Under 1024 px it becomes a
+  drawer behind a menu button, closed by Escape, the backdrop or a link.
+- A top bar with the page title, today's date in Lagos, and a health pill:
+  "All systems normal", or how many warning and critical alerts were seen in
+  the last 24 hours, linking to them.
+- A red banner across every page when an alert could not be delivered, or
+  when nobody is set to receive escalation emails.
+- Motion is short and calm: content rises in on load, toasts slide in, a
+  skeleton shows while a page loads. None of it under
+  `prefers-reduced-motion`.
+- Saving is immediate and confirmed: an escalation's status saves when it is
+  chosen, with a toast; switches and forms do the same.
 
 **Test runs never look like work.** Eval runs write real records, so the
 queue and the Today numbers leave out escalations and conversations from eval
@@ -1198,32 +1402,54 @@ runs. The conversation list shows customer channels by default, with a filter
 for each channel, eval included.
 
 1. **Today.**
-   - Customers: conversations (web, phone and typed), the share resolved
-     without a person, open escalations, upcoming callbacks, alerts today.
+   - A greeting for the time of day in Lagos.
+   - "Finish setting up", shown only while something is missing: someone to
+     receive emails, the voice assistant id, the knowledge base loaded. Each
+     item says how, and ticks itself off.
+   - Four cards: conversations today (by voice and typed), the share solved
+     by the assistant of those finished, open escalations with callbacks
+     booked, and alerts today with how many are critical.
+   - Customer conversations per day for the last 14 days, Lagos days, as
+     bars split by how they ended (solved, ticket, escalated, other), with a
+     key. Plain CSS, no chart library.
+   - "Needs a person": the soonest open escalations. "Latest conversations":
+     the six most recent, with channel, outcome and the customer's first
+     words.
    - Speed and cost: first reply on a call and voice turn to first audio, p50
      and p95; agent spend estimate and Vapi cost, side by side and labelled,
      never added together.
-   - The ten soonest open escalations, with a link to the full queue.
 2. **Escalations.**
-   - The queue, ordered by booked time: category, age, booking status,
-     notification status.
-   - Status changes (open, in progress, closed) are the console's only write.
-     Each change writes a row to `escalation_status_changes`, old and new
-     status, in the same statement as the update, so neither happens
+   - The queue, ordered by booked time: the person, category, age, booking
+     status, notification status, and the notification error when one
+     failed.
+   - Status changes (open, in progress, closed) save as soon as they are
+     chosen. Each change writes a row to `escalation_status_changes`, old and
+     new status, in the same statement as the update, so neither happens
      without the other.
-3. **Conversations.** A list with channel and outcome. The detail view is a
-   timeline of turns (customer said, assistant said, answer type, gate
-   results), with the tool calls, retrievals and cited chunks, events, latency
-   and cost in line. A reply the checks stopped is shown under the failed
-   check, marked as never sent.
-4. **Knowledge gaps.** Declined and unsupported questions, grouped by nearest
-   knowledge base section or "no match", with counts.
-5. **Alerts.** Open alerts with occurrences, last seen, and whether they were
-   delivered.
-6. **Evals.** Runs with the pass rate per scenario and per model. The benchmark
-   table lives here, counting each model's latest three benchmark runs. A run
-   with no result `EVAL_RUN_STOPPED_AFTER_MINUTES` after it started shows as
-   stopped, not running.
+3. **Conversations.** A list with channel and outcome, filterable by channel.
+   The detail view is a timeline of turns: the customer and the assistant
+   with avatars, the answer type, and an "inferred" label on a hedged
+   answer. "What happened behind this reply" opens the gate results, tool
+   calls, retrievals and cited chunks, latency and cost. A reply the checks
+   stopped is shown under the failed check, marked as never sent.
+4. **Knowledge.** Three tabs (§8):
+   - Questions to answer: the gaps, grouped, each with "Answer this".
+   - Team answers, and service notices with their end dates: each on or
+     off, with how many answers have cited it. "Add" opens a form in a
+     dialog.
+5. **Alerts.** Counts by severity, then the alerts with occurrences, first
+   and last seen, and whether each was delivered.
+6. **Evals.** Runs with the pass rate per scenario and per model. The
+   benchmark table lives here, counting each model's latest three benchmark
+   runs. A run with no result `EVAL_RUN_STOPPED_AFTER_MINUTES` after it
+   started shows as stopped, not running.
+7. **Settings.**
+   - Notifications: who receives escalation handoffs, critical alerts and
+     warnings (§10.3). Add a person, switch each kind on or off, pause,
+     remove, or send a test email.
+   - This deployment: the agent model, whether the voice assistant is
+     connected, the knowledge base's sections (and how many came from the
+     team), and the sending address. Read only.
 
 ---
 
@@ -1306,8 +1532,8 @@ A model call to do a parser's job is money spent on nothing.
 **The benchmark**, run before submission:
 
 - `npm run eval -- --model claude-haiku-4-5-20251001` and
-  `npm run eval -- --model claude-sonnet-5-5`, three runs each, with
-  `SIDE_EFFECTS_MODE=sandbox` so nothing is booked or emailed.
+  `npm run eval -- --model claude-sonnet-5-5`, three runs each, sandboxed
+  by the eval runner so nothing is booked or emailed.
 - Compared on:
   - pass rate per scenario
   - repairs and fallbacks per turn
@@ -1445,6 +1671,11 @@ all in the wiring, not the features.
   - Assertions are deterministic. They read the database (which tools ran,
     what was created, gate results) and the spoken text (required and
     forbidden content).
+  - Every scenario also fails if any turn ended in an agent error (deadline,
+    limit, crash): the system-trouble fallback declines and points to the
+    dashboard, which let two decline scenarios pass while the agent never ran
+    (FAILURES 43). A gate fallback is behaviour under test and is judged by
+    the scenario's own checks.
   - Results are written to `eval_runs` and `evaluations`.
 - **Voice checklist**, manual:
   - every scenario spoken on the deployed page
@@ -1468,10 +1699,11 @@ all in the wiring, not the features.
 | Voice flow                   | Manual, on the deployed page                                                                                 | Speech in, spoken reply out, and the conversation and tool calls are in Supabase.                                                                                                                |
 | Logging                      | After each scripted conversation                                                                             | Rows exist in conversations, turns, retrieval logs, tool calls, tickets and escalations, matching what happened.                                                                                 |
 
-**Edge and adversarial cases**, each with its own assertions. Thirteen are
+**Edge and adversarial cases**, each with its own assertions. Sixteen are
 scripted in `evals/scenarios.ts`: the twelve below that a conversation can
-show, and `typed_lookup`, which runs a lookup as a typed message and checks it
-is written for reading (§13). The two about a finished escalation (a second
+show, `typed_lookup`, which runs a lookup as a typed message and checks it is
+written for reading (§13), and three for inferred answers (§8). The two about
+a finished escalation (a second
 escalation in the same call, a lookup after one) are covered by the MCP
 contract tests, which call the tools directly, not by a scripted conversation:
 
@@ -1483,11 +1715,21 @@ contract tests, which call the tools directly, not by a scripted conversation:
 - TXN-9002, where the record contradicts the caller
 - a refund request, and a cancellation request
 - "Can I pay in Bitcoin?" (covered by the knowledge base: no). Passes only if
-  the search returns the Feature Availability And Limitations chunk and the
-  reply says crypto or Bitcoin isn't supported. Retrieval misses it today
-  (§19), so this case fails, and is reported as failing.
+  the Feature Availability And Limitations chunk came back (found, or related
+  since 2026-09-30), the answer cites it, an inferred answer carries the
+  hedge, and one sentence says crypto or Bitcoin isn't supported. The
+  agent's query scores 0.388 to 0.390 against the 0.39 threshold, so either
+  path happens (§19).
 - "What are your support hours?" (not covered: decline, point to the
   dashboard)
+- "Can I give my accountant their own login?" (`team_access_inferred`): the
+  Account And Team Access section came back and is cited, and an inferred
+  answer carries the hedge.
+- "Can I send money to a friend personally?" (`personal_transfer`): says it
+  is not supported or is for businesses; never says yes.
+- "Can RelayPay pay my staff salaries every month?" (`payroll_related`): a
+  decline, or an inferred answer with the hedge. Never claims payroll is
+  supported, and no number.
 - a second escalation in the same call (idempotent)
 - a lookup after escalation (refused)
 - a non-English opener
@@ -1508,9 +1750,11 @@ These go in the one-pager and the reflection, named before a grader finds them.
   Anyone who knows a customer's contact name and company is treated as that
   customer. A real deployment would send a one-time code to the email on file.
 - **English only.**
-- **The support inbox is whatever `SUPPORT_INBOX_EMAIL` lists.** The sending
+- **Notifications go to whoever is on the Settings list.** The sending
   domain is verified in Resend (checked through the domains API on
-  2026-09-29), so any address works. There is no shared helpdesk behind it.
+  2026-09-29), so any address works. There is no shared helpdesk behind it,
+  and no per-person console accounts: anyone with the console password can
+  change the list.
 - **The phone number is US only.** Whether it works from Nigeria is decided by
   the Phase 6 test, not assumed.
 - **A new Claude Code process starts on every turn** on Vercel. The measured
@@ -1520,15 +1764,27 @@ These go in the one-pager and the reflection, named before a grader finds them.
   gate. The prompt and the eval suite cover that; code does not.
 - **The seed data is static and dated.** Stale-ETA handling is real; there is
   no live data behind it.
-- **Retrieval misses some answers the knowledge base has.** Recall is 0.889 at
-  the chosen threshold. "Can I pay a supplier in Bitcoin?" is answered only
-  because Sonnet happens to search "...Bitcoin or other cryptocurrency?", which
-  scores 0.390 against the 0.39 threshold; the plain question scores 0.367 and
-  is declined. That fact is one bullet in a list, "Bitcoin" is nowhere in the
-  text, and the best semantic hit for the plain question is the wrong section
-  (FAILURES 25). A decline is the safe failure. Four
-  topic-adjacent out-of-scope questions clear the threshold, so for those the
-  prompt's "say only what the chunks say" is the only guard (§8).
+- **Retrieval misses some wordings the knowledge base answers.** Recall is
+  0.875 at the chosen threshold on 82 questions. Every section is reachable
+  (§8), but 5 of 37 customer-worded questions do not find their own section.
+  Since 2026-09-30 a near miss comes back as related, and is answered with a
+  hedge rather than declined: Bitcoin now scores 0.388 to 0.390 and is
+  answered either way (FAILURES 25, 39). The prompt's example
+  "consumer-to-consumer for a friend" was added after watching the friend
+  question fail, so that case passing shows the example works, not that the
+  agent generalises. A decline is still the safe failure below the related
+  floor. Four topic-adjacent out-of-scope questions clear the threshold, so
+  for those the prompt's "say only what the chunks say" is the only guard.
+- **"Inferred" is the model's judgement, checked only partly.** Code makes
+  sure an inferred answer cites a section the search returned, carries the
+  hedge, and has no number the evidence doesn't; it cannot check that the
+  inference itself is sound. A wrong inference is said with "I'm not
+  completely certain" and an offer of a specialist, which is the design's
+  whole defence. The three inferred eval cases passed; that is three
+  questions, not a measurement of inference quality.
+- **The agent learns only through people.** It does not write to its own
+  knowledge: the team answers gaps in the console (§8). Nothing is learned
+  from a conversation until someone reads it.
 - **The SDK cost figure is an estimate.**
 
 ---
@@ -1576,6 +1832,13 @@ These go in the one-pager and the reflection, named before a grader finds them.
 | 2026-09-30 | After an abort, `runAgent` waits at most `AGENT_ABORT_GRACE_MS` (1 s), then returns with the tool calls seen so far (§6.1). | Three benchmark turns took 7 to 7.5 s after the 14 s deadline to return, so a caller would have heard about 20 s of silence before the fallback (FAILURES 36). | `run-agent.test.ts` with a stream that never ends. Not yet re-measured end to end. |
 | 2026-09-30 | The prompt grew to 1,619 tokens on Sonnet's tokenizer, about 120 over the §6.5 target. | The fixes above and the typed channel's state line. Trimming it would mean re-running the benchmark, and the static part is cached. | Token-counting endpoint. |
 | 2026-09-30 | The customer page and the console were redesigned within the brand direction (§13, §14): two-column page with voice and typing tabs, a transcript rather than chat bubbles, toned status pills and a turn timeline in the console. All strings in `copy.ts`. | Akin asked for production-grade pages. | Screenshots in Edge at 1366 px and 390 px, no sideways scroll; lint and typecheck clean. Contrast of the text colours computed against WCAG AA. |
+| 2026-09-30 | Runtime records cleared: every conversation, turn, tool call, retrieval log, ticket, escalation, job, alert and eval run before this date, with the ticket and escalation sequences restarted. Seed data, knowledge chunks and the migration history kept. | Akin asked for the database to be cleared of my tests. | Row counts after: 0 in each runtime table; customers 5, transactions 5, payouts 3, chunks 37. Conversation ids and references quoted in earlier rows and in FAILURES no longer resolve. |
+| 2026-09-30 | `SUPPORT_INBOX_EMAIL` replaced by `notification_recipients`, managed in the console's Settings page, with a switch per person for escalations, critical alerts and warnings (§10.3, migration `0006`). Nobody set for escalations is a recorded failure and a critical alert. Every email uses one template with the logo inline (§10.3). | Akin asked for a place to add people for each kind of notification, and a proper template with the logo on every email. | Through the dev server: add 201, switch 200, test email 200 (sent through Resend to its test inbox), remove 200. `notifications.test.ts`, `notices.test.ts`, `handoff-email.test.ts`. The emails were previewed in Edge; not checked in Outlook or Gmail. |
+| 2026-09-30 | `SIDE_EFFECTS_MODE` removed. The app is always live, on localhost too; only the eval runner sandboxes, unless `--live` (§10.1). Off Vercel the server runs the outbox worker itself every minute, since pg_cron cannot reach localhost; a job for an eval conversation always runs sandboxed. | Akin: "Everything should work even on localhost." Without the local worker, retries, alert emails and idle-conversation closing would have silently never run locally. | Typecheck; the Settings test email above was sent from localhost; the job-claim SQL ran against the real schema in a rolled-back transaction. No escalation was booked from localhost after the change, and the local worker's retry path has no automated test. |
+| 2026-09-30 | Pending migrations run when the server starts (`src/instrumentation.ts`, §4), sharing `runMigrations()` with `npm run db:migrate`. | Akin asked for migrations to run on app start if not yet run. | Akin's `npm run dev`: "[migrations] 2 applied at start: 0006_notification_recipients.sql, 0007_team_knowledge.sql". Later dev starts logged nothing (the fast path logs only what it applies), and `npm run db:migrate`, through the same function, then said "Nothing to do: all 7 migrations are in place." Not yet seen on Vercel. |
+| 2026-09-30 | Inferred answers (§8): search returns related sections under the threshold; an answer resting on one is said with a code-written hedge; `grounding` is recorded (migration `0007`). Code decides the grounding from the tool log (FAILURES 39). | Akin asked for the agent to infer from what it knows and say it is not sure. | Coverage of all 37 sections (§8); five weak questions end to end; unit tests; the eval rows below. |
+| 2026-09-30 | "Learn from itself" is built as learning through the team: they answer the agent's gaps and post service notices in the console, and those become searchable knowledge at once (§8, migration `0007`). The agent never writes to its own knowledge. | Akin asked for the agent to learn from itself. An agent that stores its own inferences would repeat its mistakes with more confidence each time, breaking "nothing is spoken that the system cannot stand behind". This is my reading of the request; Akin has not yet confirmed it. | End to end on the dev server: a service notice ("GBP payouts running a day late") posted through `POST /api/console/knowledge` was found by the agent's search (0.741) and passed on, typed, in the next conversation. Switched off through `PATCH`, it was gone from the next answer. The test notice was then deleted. |
+| 2026-09-30 | Scripts removed: `phase0-probe`, `phase0-report`, `phase0-simulate-call`, `phase5-live-check`, and their npm commands. | Akin asked for a lean codebase. Their numbers are recorded in the rows above and in FAILURES; the rows citing them are history. | `npm run build` and `npm test` pass without them. |
 
 Record every departure from this document here, in the same piece of work as
 the code change.
@@ -1612,8 +1875,12 @@ replaced with measured values, with the measurement noted.
 | `MAX_CLARIFY_STREAK`                   | 2                                |                                                             |
 | `CHUNK_MAX_CHARS`                      | 900                              |                                                             |
 | `RETRIEVAL_TOP_K`                      | 4                                |                                                             |
-| `RETRIEVAL_MIN_SCORE`                  | 0.39                             | Calibrated 2026-09-29 (§8)                                  |
+| `RETRIEVAL_MIN_SCORE`                  | 0.39                             | Calibrated 2026-09-29, confirmed 2026-09-30 on 82 questions (§8) |
 | `MEMORY_RETRIEVAL_MIN_SCORE`           | 4.5                              | BM25 floor for memory and degraded search, same calibration |
+| `RELATED_MIN_SCORE` / `MEMORY_RELATED_MIN_SCORE` | 0.30 / 2.5             | Floor for related sections an inferred answer may use (§8); under it a hit is noise |
+| `RELATED_TOP_K`                        | 3                                | Related sections returned when nothing is found             |
+| `MIGRATION_CONNECT_TIMEOUT_MS`         | 10000                            | Migrations at server start give up on an unreachable database |
+| `OUTBOX_LOCAL_INTERVAL_MS`             | 60000                            | The outbox worker off Vercel (§10.1)                        |
 | `EMBEDDING_MODEL`                      | `text-embedding-3-small`         |                                                             |
 | `CALLBACK_DURATION_MIN`                | 30                               | Matches the Cal.com event type                              |
 | `SLOT_ALTERNATIVES`                    | 2                                |                                                             |

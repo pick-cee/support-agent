@@ -133,7 +133,7 @@ export async function finishTurn(turnId: string, outcome: TurnOutcome): Promise<
         set spoken_text = $2, answer_type = $3, reply_source = $4, confidence_note = $5, kb_chunk_ids = $6,
             gate_results = $7, repaired = $21, fallback_used = $8, filler_used = $9, status = $10, error = $11,
             model = $12, input_tokens = $13, output_tokens = $14, cache_read_tokens = $15, cache_write_tokens = $16,
-            cost_estimate_usd = $17, ttft_ms = $18, total_ms = $19, timings = $20, updated_at = now()
+            cost_estimate_usd = $17, ttft_ms = $18, total_ms = $19, timings = $20, grounding = $22, updated_at = now()
       where id = $1`,
     [
       turnId,
@@ -157,6 +157,7 @@ export async function finishTurn(turnId: string, outcome: TurnOutcome): Promise<
       outcome.totalMs,
       JSON.stringify({ ...outcome.timings, mcp_status: outcome.mcpStatus, speech_stripped: outcome.speechStripped }),
       outcome.repaired,
+      outcome.grounding,
     ],
   );
   // The retrieval log says which chunks the spoken answer actually rested on (DESIGN §7.3).
