@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
 import { CAL_API_BASE, CAL_API_VERSIONS, CALLBACK_DURATION_MIN, CALLBACK_EVENT_TYPE_SLUG, CALLBACK_EVENT_TYPE_TITLE } from "../src/lib/constants";
 
@@ -37,9 +37,14 @@ async function main(): Promise<void> {
     console.log(`Created event type "${CALLBACK_EVENT_TYPE_TITLE}" (${eventType.id}, ${eventType.lengthInMinutes} min).`);
   }
   const env = readFileSync(".env", "utf8");
-  if (!/^\s*CAL_EVENT_TYPE_ID=\S/m.test(env)) {
+  const current = /^\s*CAL_EVENT_TYPE_ID=(\S*)/m.exec(env)?.[1];
+  if (!current) {
     appendFileSync(".env", `${env.endsWith("\n") ? "" : "\n"}CAL_EVENT_TYPE_ID=${eventType.id}\n`);
     console.log("Added CAL_EVENT_TYPE_ID to .env. Add the same value in Vercel.");
+  } else if (current !== String(eventType.id)) {
+    // A deleted event type comes back with a new id; the old one would make every booking fail.
+    writeFileSync(".env", env.replace(/^(\s*CAL_EVENT_TYPE_ID=)\S*/m, `$1${eventType.id}`));
+    console.log(`Replaced CAL_EVENT_TYPE_ID ${current} with ${eventType.id} in .env. Change it in Vercel too, then redeploy.`);
   }
 }
 

@@ -1056,8 +1056,11 @@ one.
 
 - An event type, "RelayPay support callback", 30 minutes, on Akin's Cal.com
   account. Availability is whatever that event type allows. `CAL_API_KEY` and
-  `CAL_EVENT_TYPE_ID` in env. `npm run cal:setup` finds it or creates it and
-  prints the id (7276210, created 2026-09-29).
+  `CAL_EVENT_TYPE_ID` in env. `npm run cal:setup` finds it or creates it,
+  prints the id, and writes it to `.env`, replacing an outdated one. The
+  current id is 7292248, recreated 2026-09-30 after the first (7276210) was
+  deleted in the Cal.com dashboard; a deleted event type comes back with a
+  new id, which Vercel needs too.
 - API v2: the slots endpoint for `find_callback_slots`, and the create-booking
   endpoint with `start` in UTC, `attendee { name, email, timeZone }`, and the
   escalation ref in metadata. **The `cal-api-version` header value
