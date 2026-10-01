@@ -90,7 +90,7 @@ export async function POST(request: Request): Promise<Response> {
   let userText: string;
   try {
     conversation = await upsertConversation({ vapiCallId: body.call.id, channel: channelOf(body), callerIdentifier: callerNumberOf(body) });
-    const [spent, previousAnswerType] = await Promise.all([agentSpendTodayUsd(), turnIndex > 0 ? lastAnswerType(conversation.id) : Promise.resolve(null)]);
+    const [spent, previousAnswerType] = await Promise.all([agentSpendTodayUsd(), turnIndex > 0 ? lastAnswerType(conversation.id, turnIndex) : Promise.resolve(null)]);
     spentToday = spent;
     check = checkBeforeModel({ userText: lastCaller?.text ?? "", turnIndex, spentTodayUsd: spentToday, lastAnswerType: previousAnswerType });
     userText = check.action === "run" ? check.userText : (lastCaller?.text ?? "");

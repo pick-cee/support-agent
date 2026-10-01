@@ -731,3 +731,21 @@ here, never from memory afterwards.
 - **Fix:** only questions the assistant searched for count. Checked against
   the records: the two real gaps (support hours, personal transfers) had
   searched; the attack had not.
+
+### 53. The quick goodbye did not fire on a live call
+
+- **When:** 2026-10-01, reading Akin's live call of 30 September (22:14
+  Lagos time) for the testing evidence.
+- **Symptom:** "Alright. Thank you. You. Very much, Nairobi. Bye bye." went
+  to the model (3.5 s to first words) instead of the instant goodbye, on the
+  deployed code that has it (live since 21:00 UTC, 14 minutes before the
+  call; the filler only on lookup turns shows the new code was serving).
+- **What the records show:** the turn was attempt 3. Vapi sent it three
+  times as the caller kept talking ("Alright. Thank you." first). The full
+  sentence does pass `isPlainGoodbye`, checked directly.
+- **Probable cause, not confirmed:** `lastAnswerType` returned the newest
+  reply type of any turn, so on a re-sent turn it could read the same turn's
+  own earlier attempt instead of the previous reply, and the guard then saw
+  the wrong reply. The production logs that would confirm it were not kept.
+- **Fix:** `lastAnswerType` reads only turns before the current one, at every
+  caller (voice, typing, eval). Not yet seen on a live call.

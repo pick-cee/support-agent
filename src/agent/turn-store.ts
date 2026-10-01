@@ -210,12 +210,17 @@ export async function agentSpendTodayUsd(): Promise<number> {
 }
 
 /** The type of the conversation's last reply, so the quick goodbye never cuts off a callback being arranged. */
-export async function lastAnswerType(conversationId: string): Promise<string | null> {
+/**
+ * The previous turn's reply type. Turns before this one only: Vapi re-sends a
+ * turn while the caller is still talking, and an earlier attempt of the same
+ * turn may already have recorded a reply type (FAILURES 53).
+ */
+export async function lastAnswerType(conversationId: string, beforeTurnIndex: number): Promise<string | null> {
   const result = await queryDb<{ answer_type: string }>(
     `select answer_type from support_agent.conversation_turns
-      where conversation_id = $1 and answer_type is not null
+      where conversation_id = $1 and turn_index < $2 and answer_type is not null
       order by turn_index desc limit 1`,
-    [conversationId],
+    [conversationId, beforeTurnIndex],
   );
   return result.rows[0]?.answer_type ?? null;
 }

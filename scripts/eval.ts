@@ -99,7 +99,7 @@ async function runScenario(scenario: Scenario, runId: string, model: string, def
   for (const [turnIndex, line] of scenario.turns.entries()) {
     transcript.push({ role: "caller", text: line });
     const state = (await queryDb<{ verified_customer_id: string | null; escalation_id: string | null; clarify_streak: number }>(`select verified_customer_id, escalation_id, clarify_streak from support_agent.conversations where id = $1`, [conversation.id])).rows[0]!;
-    const check = checkBeforeModel({ userText: line, turnIndex, spentTodayUsd: 0, lastAnswerType: turnIndex > 0 ? await lastAnswerType(conversation.id) : null });
+    const check = checkBeforeModel({ userText: line, turnIndex, spentTodayUsd: 0, lastAnswerType: turnIndex > 0 ? await lastAnswerType(conversation.id, turnIndex) : null });
     const userText = check.action === "run" ? check.userText : line;
     const turn = await beginTurn({ conversationId: conversation.id, turnIndex, userText, truncated: check.action === "run" && check.truncated });
     if (check.action === "reply") {
