@@ -46,7 +46,8 @@ export function CallView({ phase, lines, summary, startedAt, busy, muted, orbRef
   const endRef = useRef<HTMLDivElement>(null);
   const notice = phase === "micBlocked" ? PAGE.voice.micBlocked : phase === "connectFailed" ? PAGE.voice.connectFailed : phase === "dropped" ? PAGE.voice.dropped : null;
   const statusText = muted && busy ? PAGE.voice.mutedStatus : phase === "micBlocked" || phase === "connectFailed" || phase === "dropped" ? null : PAGE.voice.status[phase];
-  const orbState = phase === "speaking" ? "speaking" : phase === "listening" ? "listening" : busy ? "busy" : "idle";
+  // "rest" once the call is over: the orb goes quiet, so it no longer looks live.
+  const orbState = phase === "speaking" ? "speaking" : phase === "listening" ? "listening" : busy ? "busy" : "rest";
   const compact = lines.length > 0;
 
   // The newest words stay in view.

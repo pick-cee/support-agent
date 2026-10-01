@@ -138,12 +138,14 @@
 
 /* --- Welcome --------------------------------------------------------------- */
 
+/* Voice first: one large button to start a call, in the same orb the call
+   uses, so pressing it feels like the orb coming alive. */
 .welcome {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding-top: clamp(8px, 7vh, 72px);
+  padding-top: clamp(0px, 3vh, 32px);
 }
 
 .welcome > * {
@@ -151,194 +153,301 @@
 }
 
 .welcome > *:nth-child(2) {
-  animation-delay: 70ms;
+  animation-delay: 60ms;
 }
 
 .welcome > *:nth-child(3) {
-  animation-delay: 130ms;
+  animation-delay: 120ms;
 }
 
-.welcome > *:nth-child(5) {
-  animation-delay: 190ms;
+.welcome > *:nth-child(4) {
+  animation-delay: 200ms;
 }
 
+.welcome > *:nth-child(5),
 .welcome > *:nth-child(6) {
-  animation-delay: 320ms;
+  animation-delay: 300ms;
 }
 
-.mark {
-  display: grid;
-  place-items: center;
-  width: 68px;
-  height: 68px;
-  margin-bottom: 22px;
-  border-radius: 20px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
+.welcome > *:nth-child(7) {
+  animation-delay: 380ms;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+.eyebrow::before,
+.eyebrow::after {
+  content: "";
+  width: 20px;
+  height: 1px;
+  background: var(--brand-accent);
 }
 
 .welcomeHeading {
   margin: 0;
-  font-size: clamp(1.875rem, 1.3rem + 2.2vw, 2.625rem);
-  letter-spacing: -0.025em;
-  line-height: 1.15;
+  font-size: clamp(2rem, 1.3rem + 2.4vw, 2.875rem);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
   color: var(--brand-primary);
 }
 
 .welcomeLead {
-  max-width: 520px;
+  max-width: 500px;
   margin: 14px 0 0;
   font-size: var(--font-size-lg);
   line-height: 1.55;
   color: var(--text-muted);
 }
 
-.suggestions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+.hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   width: 100%;
+  margin-top: 34px;
+}
+
+/* Sound arcs either side of the orb. They light up in turn, slowly: the line
+   is open. Under reduced motion they stay still and faint. */
+.waves {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 420px;
+  max-width: 100%;
+  height: 152px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  color: var(--brand-accent);
+}
+
+.waves path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.16;
+  animation: wave 3.2s ease-in-out infinite;
+}
+
+.waves path[data-step="2"] {
+  animation-delay: 0.3s;
+}
+
+.waves path[data-step="3"] {
+  animation-delay: 0.6s;
+}
+
+@keyframes wave {
+  0%,
+  100% {
+    opacity: 0.16;
+  }
+
+  35% {
+    opacity: 0.75;
+  }
+}
+
+.talk {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: none;
+  cursor: pointer;
+  position: relative;
+}
+
+.talk:focus-visible {
+  outline: none;
+}
+
+.talkOrb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 152px;
+  height: 152px;
+  border-radius: 50%;
+  background: var(--brand-primary-tint);
+  transition:
+    transform 280ms var(--ease-out),
+    background-color 280ms ease;
+}
+
+.talkOrb::before {
+  content: "";
+  position: absolute;
+  inset: 16px;
+  border-radius: 50%;
+  background: #dde5f4;
+  transition: background-color 280ms ease;
+}
+
+.talk:focus-visible .talkOrb {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
+
+.talkCore {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: var(--brand-primary);
+  color: #ffffff;
+  box-shadow:
+    0 2px 4px rgba(15, 52, 123, 0.18),
+    0 12px 28px rgba(15, 52, 123, 0.26);
+  transition:
+    transform 280ms var(--ease-out),
+    background-color 200ms ease,
+    box-shadow 280ms ease;
+}
+
+.talk:hover .talkOrb {
+  transform: scale(1.04);
+  background: var(--accent-tint);
+}
+
+.talk:hover .talkOrb::before {
+  background: #cdeef9;
+}
+
+.talk:hover .talkCore {
+  background: var(--brand-primary-hover);
+  box-shadow:
+    0 2px 4px rgba(15, 52, 123, 0.2),
+    0 16px 36px rgba(15, 52, 123, 0.3);
+}
+
+.talk:active .talkCore {
+  transform: scale(0.96);
+}
+
+.hero:has(.talk:hover) .waves path {
+  animation-duration: 1.6s;
+}
+
+.talkLabel {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--brand-primary);
+}
+
+.talkHint {
+  max-width: 360px;
+  margin: 6px 0 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  color: var(--text-subtle);
+  text-wrap: balance;
+}
+
+.welcomeHeading,
+.welcomeLead {
+  text-wrap: balance;
+}
+
+.chipsLabel {
   margin: 40px 0 0;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 14px 0 0;
   padding: 0;
   list-style: none;
 }
 
-.suggestions > li {
-  display: flex;
-  animation: rise 600ms var(--ease-out) both;
-}
-
-.suggestions > li:nth-child(1) {
-  animation-delay: 200ms;
-}
-
-.suggestions > li:nth-child(2) {
-  animation-delay: 260ms;
-}
-
-.suggestions > li:nth-child(3) {
-  animation-delay: 320ms;
-}
-
-.suggestion {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 14px;
-  width: 100%;
-  min-height: 132px;
-  padding: 18px 18px 40px;
-  text-align: left;
-  background: var(--surface);
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px 0 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: 999px;
+  background: var(--surface);
   box-shadow: var(--shadow-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text);
   cursor: pointer;
   transition:
     transform 200ms var(--ease-out),
-    box-shadow 200ms var(--ease-out),
-    border-color 200ms ease;
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    color 200ms ease;
 }
 
-.suggestion:hover:not(:disabled) {
-  transform: translateY(-3px);
+.chip:hover:not(:disabled) {
+  transform: translateY(-2px);
   border-color: #c7d3ea;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow);
+  color: var(--brand-primary);
 }
 
-.suggestion:active:not(:disabled) {
-  transform: translateY(-1px);
+.chip:active:not(:disabled) {
+  transform: none;
 }
 
-.suggestion:disabled {
+.chip:disabled {
   cursor: default;
   opacity: 0.6;
 }
 
-.suggestionIcon {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: var(--brand-primary-tint);
-  color: var(--brand-primary);
-  transition:
-    background-color 200ms ease,
-    color 200ms ease;
-}
-
-.suggestion:hover:not(:disabled) .suggestionIcon {
-  background: var(--accent-tint);
+.chipIcon {
+  flex: none;
   color: var(--accent-text);
 }
 
-.suggestionText {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  line-height: 1.45;
-  color: var(--text);
-}
-
-.suggestionArrow {
-  position: absolute;
-  right: 16px;
-  bottom: 14px;
-  color: var(--text-subtle);
-  opacity: 0;
-  transform: translateX(-6px);
-  transition:
-    opacity 200ms ease,
-    transform 200ms var(--ease-out),
-    color 200ms ease;
-}
-
-.suggestion:hover:not(:disabled) .suggestionArrow,
-.suggestion:focus-visible .suggestionArrow {
-  opacity: 1;
-  transform: none;
-  color: var(--brand-primary);
-}
-
 .points {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-  width: 100%;
-  margin: 36px 0 0;
-  padding: 24px 4px 0;
-  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 22px;
+  margin: 34px 0 0;
+  padding: 0;
   list-style: none;
-  text-align: left;
 }
 
 .point {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--font-size-xs);
+  color: var(--text-subtle);
 }
 
 .pointIcon {
   flex: none;
-  margin-top: 2px;
   color: var(--accent-text);
-}
-
-.pointTitle {
-  display: block;
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--text);
-}
-
-.pointBody {
-  display: block;
-  margin-top: 2px;
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
-  color: var(--text-subtle);
 }
 
 /* --- The conversation ------------------------------------------------------ */
@@ -983,32 +1092,41 @@
   }
 }
 
+/* The same deep-blue core as the welcome's talk button, so pressing it carries
+   straight on: deep blue while connecting and while the assistant speaks,
+   white with the accent while the customer has the floor, quiet once over. */
 .orbCore {
   position: relative;
   display: grid;
   place-items: center;
-  width: 84px;
-  height: 84px;
+  width: 92px;
+  height: 92px;
   border-radius: 50%;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
-  color: var(--brand-primary);
+  background: var(--brand-primary);
+  border: 1px solid var(--brand-primary);
+  box-shadow:
+    0 2px 4px rgba(15, 52, 123, 0.18),
+    0 12px 28px rgba(15, 52, 123, 0.26);
+  color: #ffffff;
   transition:
     background-color 240ms ease,
     color 240ms ease,
-    border-color 240ms ease;
+    border-color 240ms ease,
+    box-shadow 240ms ease;
 }
 
 .orb[data-state="listening"] .orbCore {
-  border-color: var(--brand-accent);
+  background: var(--surface);
+  border: 2px solid var(--brand-accent);
+  box-shadow: var(--shadow-lg);
   color: var(--accent-text);
 }
 
-.orb[data-state="speaking"] .orbCore {
-  background: var(--brand-primary);
-  border-color: var(--brand-primary);
-  color: #ffffff;
+.orb[data-state="rest"] .orbCore {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: var(--shadow);
+  color: var(--text-subtle);
 }
 
 .callHeading {
@@ -1261,39 +1379,58 @@
     padding: 0;
   }
 
-  .suggestions {
-    grid-template-columns: 1fr;
-    gap: 10px;
-    margin-top: 28px;
-  }
-
-  .suggestion {
-    flex-direction: row;
-    align-items: center;
-    min-height: 0;
-    padding: 14px 40px 14px 14px;
-  }
-
-  .suggestionArrow {
-    top: 50%;
-    bottom: auto;
-    margin-top: -8px;
-    opacity: 1;
-    transform: none;
-  }
-
-  .points {
-    grid-template-columns: 1fr;
-    gap: 14px;
-    margin-top: 28px;
-  }
-
   .hint {
     display: none;
   }
 
   .welcomeLead {
     font-size: var(--font-size-md);
+  }
+
+  .hero {
+    margin-top: 26px;
+  }
+
+  .waves {
+    height: 136px;
+  }
+
+  .talkOrb {
+    width: 136px;
+    height: 136px;
+  }
+
+  .talkOrb::before {
+    inset: 14px;
+  }
+
+  .talkCore {
+    width: 84px;
+    height: 84px;
+  }
+
+  .talkHint {
+    font-size: var(--font-size-xs);
+  }
+
+  .chipsLabel {
+    margin-top: 26px;
+  }
+
+  .chips {
+    gap: 8px;
+  }
+
+  .chip {
+    height: 36px;
+    padding: 0 13px 0 11px;
+    font-size: var(--font-size-xs);
+  }
+
+  .points {
+    flex-direction: column;
+    align-items: center;
+    margin-top: 24px;
   }
 
   .orb {
@@ -1321,4 +1458,14 @@
   .available {
     padding: 4px 10px 4px 8px;
   }
+
+  /* Mid-conversation the header holds the logo and End conversation; the
+     availability pill gives way rather than squeezing the button onto two lines. */
+  .topbarActions:has(.ghostButton) .available {
+    display: none;
+  }
+}
+
+.ghostButton {
+  white-space: nowrap;
 }

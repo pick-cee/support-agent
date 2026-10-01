@@ -28,7 +28,7 @@ const base: HandoffInput = {
 
 describe("buildHandoffEmail", () => {
   it("puts the category, company and booked time in the subject", () => {
-    expect(buildHandoffEmail(base).subject).toBe("[Escalation E-2001] account · AccraStack · callback Tue 6 Oct 14:00 Lagos time");
+    expect(buildHandoffEmail(base).subject).toBe("[Escalation E-2001] Account · AccraStack · callback Tue 6 Oct 14:00 Lagos time");
   });
 
   it("lays the body out in the order DESIGN §10.3 gives", () => {
@@ -37,6 +37,7 @@ describe("buildHandoffEmail", () => {
     expect(order.every((position, index) => position >= 0 && (index === 0 || position > order[index - 1]!))).toBe(true);
     expect(text).toContain("Verified as CUS-1003 (AccraStack)");
     expect(text).toContain("Booked for Tuesday 6 October at 2 PM Lagos time.");
+    expect(text).toContain("CALLBACK BOOKED: Tuesday 6 October at 2 PM Lagos time");
     expect(text).toContain("Open the conversation: https://example.test/console/conversations/1");
     // The last three things the caller said, quoted.
     expect(text.match(/^ {2}"/gm)).toHaveLength(3 + 2);
@@ -44,9 +45,16 @@ describe("buildHandoffEmail", () => {
 
   it("says plainly when no call is booked, and why", () => {
     const { subject, text } = buildHandoffEmail({ ...base, customer: null, escalation: { ...base.escalation, call_booked: false, appointment_time: null, booking_status: "failed", booking_error: "the slot was taken" } });
-    expect(subject).toBe("[Escalation E-2001] account · unverified caller · no callback booked");
+    expect(subject).toBe("[Escalation E-2001] Account · unverified caller · no callback booked");
     expect(text).toContain("Not booked: the slot was taken.");
     expect(text).toContain("Not verified");
+  });
+
+  it("says what was looked up in words, never as tool names or raw values", () => {
+    const { text, html } = buildHandoffEmail({ ...base, toolCalls: [...base.toolCalls, { tool_name: "find_callback_slots", status: "ok", result_summary: "requested 2026-10-06T13:00:00.000Z available" }, { tool_name: "find_callback_slots", status: "ok", result_summary: "requested 2026-10-06T14:00:00.000Z available" }] });
+    expect(text).toContain("Checked who the customer is: CUS-1003");
+    expect(text).toContain("Found callback times, 2 times");
+    for (const body of [text, html]) expect(body).not.toMatch(/lookup_customer|find_callback_slots|T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
   });
 
   it("escapes HTML and attaches the logo the HTML shows", () => {

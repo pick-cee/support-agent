@@ -80,13 +80,12 @@ export const PAGE = {
   logoAlt: "RelayPay",
   headerLabel: "Support",
   available: "Available now",
-  heading: "How can we help today?",
-  lead: "Ask about payments, payouts, invoices or your account. Type below, or start a voice call.",
-  points: [
-    { title: "Approved answers", body: "From RelayPay's help content, never a guess." },
-    { title: "Payment checks", body: "Share a reference to hear its status." },
-    { title: "A specialist when needed", body: "Callbacks for anything a person should handle." },
-  ],
+  eyebrow: "AI support assistant",
+  heading: "Talk to RelayPay support",
+  lead: "Ask about payments, payouts, invoices or your account. Speak to our assistant, or type below.",
+  talk: "Start a voice call",
+  talkHint: "Speak naturally. You can say a reference such as TXN-9001 out loud.",
+  points: ["Approved answers, never a guess", "Payment and payout checks", "A specialist when you need one"],
   disclosure: "You're talking to an AI assistant. Conversations are logged for quality and follow-up.",
   englishOnly: "English only for now.",
   voice: {
@@ -133,12 +132,13 @@ export const PAGE = {
     placeholder: "Type your question",
     send: "Send message",
     thinking: "Checking",
-    hint: "Enter to send, Shift and Enter for a new line",
-    suggestionsLabel: "Popular questions",
+    hint: "Press Enter to send",
+    suggestionsLabel: "Or start with a common question",
+    // label is what the button says; text is the message it sends.
     suggestions: [
-      { kind: "fees", text: "What fees apply to international payments?" },
-      { kind: "lookup", text: "Can you check transaction TXN-9001?" },
-      { kind: "specialist", text: "My account was restricted and I need help." },
+      { kind: "lookup", label: "Check a transaction", text: "Can you check transaction TXN-9001?" },
+      { kind: "fees", label: "International fees", text: "What fees apply to international payments?" },
+      { kind: "specialist", label: "My account is restricted", text: "My account was restricted and I need help." },
     ],
     counter: (used: number, max: number) => `${used} of ${max} characters`,
     end: "End conversation",
@@ -174,6 +174,13 @@ export const PAGE = {
 // Emails to the support team (DESIGN §10.3), all in one template
 // ---------------------------------------------------------------------------
 
+/** Escalation categories (the escalation rules), as people read them: in the console and in the handoff email. */
+export const CATEGORIES: Record<string, string> = { compliance: "Compliance", account: "Account", dispute: "Dispute", payment: "Payment", other: "Other" };
+
+export function categoryLabel(value: string): string {
+  return CATEGORIES[value] ?? value.replace(/_/g, " ");
+}
+
 export const EMAIL = {
   signature: "RelayPay support system",
   manage: "Change what you receive",
@@ -189,8 +196,14 @@ export const EMAIL = {
     unverified: "unverified caller",
     badge: (ref: string) => `Escalation ${ref}`,
     title: (company: string | null) => (company ? `${company} needs a specialist` : "A customer needs a specialist"),
-    introBooked: (when: string) => `A callback is booked for ${when}. Everything the specialist needs is below, so the customer never has to repeat themselves.`,
-    introNotBooked: "No callback is booked yet. Please email the customer to arrange a time. Everything you need is below.",
+    intro: "Everything the specialist needs is below, so the customer never has to repeat themselves.",
+    highlight: {
+      booked: "Callback booked",
+      notBooked: "No callback booked yet",
+      arrange: "Please email the customer to arrange a time",
+      note: (ticket: string, category: string) => `Ticket ${ticket} · ${category}`,
+    },
+    lookedUp: (label: string, reference: string | null, problem: string | null, times: string | null) => [label, reference && `: ${reference}`, problem && ` (${problem})`, times && `, ${times}`].filter(Boolean).join(""),
     headings: { caller: "Caller", why: "Why", said: "The customer's last words", told: "What we already told them", lookedUp: "What we looked up", booking: "Booking" },
     labels: { name: "Name", email: "Email", account: "Account", note: "Support note", category: "Category", reason: "Reason", ticket: "Ticket", status: "Status", link: "Calendar booking", asked: "They asked for" },
     notVerified: "Not verified",
@@ -233,8 +246,8 @@ export const CONSOLE = {
   product: "Support console",
   team: "Support team",
   nav: {
-    groups: { overview: "Overview", work: "Work", improve: "Improve", system: "System" },
-    today: "Today",
+    groups: { work: "Work", improve: "Improve", system: "System" },
+    overview: "Overview",
     escalations: "Escalations",
     conversations: "Conversations",
     knowledge: "Knowledge",
@@ -248,10 +261,15 @@ export const CONSOLE = {
   health: {
     good: "All systems normal",
     attention: (count: number) => `${count} alert${count === 1 ? "" : "s"} need${count === 1 ? "s" : ""} attention`,
+    goodShort: "All normal",
+    attentionShort: (count: number) => `${count} alert${count === 1 ? "" : "s"}`,
   },
   login: {
     heading: "Welcome back",
     intro: "Sign in to see today's conversations, escalations and alerts.",
+    panelLabel: "Support console",
+    panelHeading: "Every conversation and every handoff, in one place.",
+    panelPoints: ["Read what customers asked and what the assistant checked", "Call back the cases that need a person, with the details ready", "Teach the assistant what it couldn't answer"],
     password: "Password",
     submit: "Sign in",
     wrong: "That password is not right.",
@@ -266,8 +284,8 @@ export const CONSOLE = {
   },
   greeting: (part: "morning" | "afternoon" | "evening") => `Good ${part}`,
   today: {
-    heading: "Today",
-    intro: "Customer conversations since midnight in Lagos. Test conversations are left out.",
+    heading: "Overview",
+    intro: (days: number) => `The last ${days} days of customer conversations, Lagos time. Test conversations are left out.`,
     setup: {
       heading: "Finish setting up",
       progress: (done: number, total: number) => `${done} of ${total} done`,
@@ -280,14 +298,22 @@ export const CONSOLE = {
     cards: {
       conversations: "Conversations",
       byChannel: (voice: number, typed: number) => `${voice} by voice, ${typed} typed`,
+      today: (count: number) => (count ? `${count} today` : "None yet today"),
       resolved: "Solved by the assistant",
       ofFinished: (resolved: number, finished: number) => `${resolved} of ${finished} finished conversations`,
       escalations: "Open escalations",
       booked: (count: number) => `${count} callback${count === 1 ? "" : "s"} booked`,
-      alerts: "Alerts today",
+      next: (when: string) => `Next callback ${when}`,
+      alerts: "Alerts",
       critical: (count: number) => (count ? `${count} critical` : "None critical"),
     },
-    activity: { heading: "Last 14 days", intro: "Conversations per day, by how they ended.", empty: "No conversations in the last 14 days yet." },
+    activity: {
+      heading: (days: number) => `Last ${days} days`,
+      intro: "Conversations each day, and how they ended.",
+      empty: (days: number) => `No customer conversations in the last ${days} days.`,
+      outcomes: "How they ended",
+      share: (count: number, percent: number) => `${count} (${percent}%)`,
+    },
     attention: { heading: "Needs a person", empty: "Nothing is waiting for a person.", viewAll: "All escalations" },
     recent: { heading: "Latest conversations", empty: "No customer conversations yet. Try the support page.", viewAll: "All conversations" },
     speed: {
@@ -296,7 +322,9 @@ export const CONSOLE = {
       vapiTurn: "Voice reply time",
       agentSpend: "AI cost (estimate)",
       vapiCost: "Voice call cost (billed)",
-      pair: (p50: string, p95: string) => `${p50} typical, ${p95} slowest 5%`,
+      slowest: (p95: string) => `Typical. The slowest 5% took ${p95}.`,
+      estimate: "An estimate, not a bill",
+      billed: "The actual bill from the voice service",
       costNote: "The AI cost is an estimate and the voice call cost is the actual bill, so they are shown side by side and never added together.",
     },
     none: "No data yet",
@@ -351,10 +379,11 @@ export const CONSOLE = {
     saved: "Saved",
     saveFailed: "Not saved. Try again.",
     empty: "No open escalations. Everything handed to a person has been dealt with.",
+    caughtUp: "All caught up",
     emptyAll: "No escalations yet.",
+    emptyAllHint: "When the assistant hands a case to a person, it appears here with the callback time.",
     count: (count: number) => `${count} ${count === 1 ? "case" : "cases"}`,
     select: "Select a case to see who to call, when, and why.",
-    selectTitle: "Nothing selected",
     notFound: "No such escalation.",
     back: "All escalations",
     why: "Why a person is needed",
@@ -380,13 +409,13 @@ export const CONSOLE = {
     intro: "The latest 100 conversations. Open one to read it and see what the assistant checked.",
     all: "All customers",
     empty: "No conversations yet.",
+    emptyHint: "Conversations appear here as soon as a customer types or calls.",
     count: (count: number) => `${count} ${count === 1 ? "conversation" : "conversations"}`,
     search: "Search conversations",
     searchPlaceholder: "Search what was said",
     clear: "Clear",
     noMatch: (search: string) => `Nothing matches "${search}".`,
     select: "Select a conversation to read it, and to see what the assistant checked before each reply.",
-    selectTitle: "Nothing selected",
     silent: "No words recorded",
     turns: (count: number) => `${count} ${count === 1 ? "reply" : "replies"}`,
   },
@@ -416,6 +445,7 @@ export const CONSOLE = {
     } as Record<string, string>,
     started: "Started",
     openEscalation: "Open the escalation",
+    times: (count: number) => `${count} times`,
     actions: {
       search_knowledge_base: "Searched the knowledge base",
       lookup_customer: "Checked who the customer is",

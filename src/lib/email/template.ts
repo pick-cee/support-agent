@@ -39,7 +39,9 @@ export type Tone = "brand" | "danger" | "warning" | "info";
 export type EmailBlock =
   | { kind: "facts"; heading?: string; rows: [label: string, value: string][] }
   | { kind: "lines"; heading?: string; lines: string[] }
-  | { kind: "quotes"; heading?: string; lines: string[] };
+  | { kind: "quotes"; heading?: string; lines: string[] }
+  /** The one fact the reader acts on, in a tinted panel at the top (the callback time). */
+  | { kind: "highlight"; label: string; value: string; note?: string; tone: Tone };
 
 export type EmailContent = {
   /** The grey line many inboxes show after the subject. */
@@ -87,6 +89,17 @@ function heading(text: string | undefined): string {
 }
 
 function block(item: EmailBlock): string {
+  if (item.kind === "highlight") {
+    const tone = TONES[item.tone];
+    const note = item.note ? `<p style="margin:6px 0 0;font-family:${FONT};font-size:13px;line-height:20px;color:${COLOURS.textMuted};">${escapeHtml(item.note)}</p>` : "";
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;border-collapse:separate;">
+      <tr><td style="padding:16px 18px;background:${tone.background};border-left:4px solid ${tone.colour};border-radius:10px;">
+        <p style="margin:0;font-family:${FONT};font-size:12px;line-height:16px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:${tone.colour};">${escapeHtml(item.label)}</p>
+        <p style="margin:6px 0 0;font-family:${FONT};font-size:18px;line-height:26px;font-weight:600;color:${COLOURS.text};">${escapeHtml(item.value)}</p>
+        ${note}
+      </td></tr>
+    </table>`;
+  }
   if (item.kind === "facts") {
     const rows = item.rows
       .map(
@@ -160,11 +173,15 @@ export function renderEmail(content: EmailContent): { html: string; text: string
     content.title,
     "",
     content.intro,
-    ...content.blocks.flatMap((item) => [
-      "",
-      ...(item.heading ? [item.heading.toUpperCase()] : []),
-      ...(item.kind === "facts" ? item.rows.map(([label, value]) => `${label}: ${value}`) : item.kind === "quotes" ? item.lines.map((line) => `  "${line}"`) : item.lines),
-    ]),
+    ...content.blocks.flatMap((item) =>
+      item.kind === "highlight"
+        ? ["", `${item.label.toUpperCase()}: ${item.value}`, ...(item.note ? [item.note] : [])]
+        : [
+            "",
+            ...(item.heading ? [item.heading.toUpperCase()] : []),
+            ...(item.kind === "facts" ? item.rows.map(([label, value]) => `${label}: ${value}`) : item.kind === "quotes" ? item.lines.map((line) => `  "${line}"`) : item.lines),
+          ],
+    ),
     ...(content.action ? ["", `${content.action.label}: ${content.action.url}`] : []),
     "",
     "--",

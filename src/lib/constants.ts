@@ -149,6 +149,8 @@ export const JOB_BACKOFF_MINUTES = [1, 2, 4, 8, 16, 32] as const;
 export const OUTBOX_BATCH_SIZE = 10;
 /** The console's 14-day chart never scales below this many conversations a day, so one is a short bar, not a spike. */
 export const CONSOLE_CHART_MIN_SCALE = 4;
+/** The console's Overview covers this many Lagos days, today included, so a quiet morning still shows the week. */
+export const CONSOLE_OVERVIEW_DAYS = 7;
 /** Off Vercel, the server runs the outbox worker itself this often; pg_cron cannot reach localhost. */
 export const OUTBOX_LOCAL_INTERVAL_MS = 60_000;
 export const ALERT_RENOTIFY_MINUTES = 30;

@@ -33,13 +33,18 @@ export function describeTools(tools: ToolCall[]): Action[] {
     const label = CONSOLE.conversation.actions[tool.tool_name] ?? tool.tool_name.replace(/_/g, " ");
     const reference = REFERENCE.exec(tool.result_summary ?? "")?.[0] ?? null;
     const result = resultOf(tool);
-    const previous = actions.at(-1);
-    // Two searches in a row are one step for the reader.
-    if (previous && previous.key === tool.tool_name && tool.tool_name === "search_knowledge_base" && previous.result === result) {
-      previous.count += 1;
+    // The same step on the same record reads as one step, counted, wherever it
+    // repeats: a caller asked for times four times, or a retry found the
+    // ticket it had already opened (created, then "already existed": the same
+    // ticket). Listed in the order each first happened; a different outcome
+    // tone (found, then failed) stays a separate step.
+    const tone: Tone = result === CONSOLE.conversation.results.not_found ? "warn" : toneOf(tool.status);
+    const same = actions.find((action) => action.key === tool.tool_name && action.reference === reference && action.tone === tone);
+    if (same) {
+      same.count += 1;
       continue;
     }
-    actions.push({ key: tool.tool_name, label, result, reference, tone: result === CONSOLE.conversation.results.not_found ? "warn" : toneOf(tool.status), count: 1 });
+    actions.push({ key: tool.tool_name, label, result, reference, tone, count: 1 });
   }
   return actions;
 }

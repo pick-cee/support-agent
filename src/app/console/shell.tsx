@@ -13,7 +13,8 @@ import styles from "./console.module.css";
 type Counts = { escalations: number; alerts: number };
 
 const GROUPS = [
-  { label: CONSOLE.nav.groups.overview, links: [{ href: "/console", label: CONSOLE.nav.today, Icon: GridIcon, count: null }] },
+  // The Overview stands alone at the top, with no group heading of its own.
+  { label: null, links: [{ href: "/console", label: CONSOLE.nav.overview, Icon: GridIcon, count: null }] },
   {
     label: CONSOLE.nav.groups.work,
     links: [
@@ -53,9 +54,9 @@ export function ConsoleShell({ counts, today, healthy, alerts, banner, children 
           <span className={styles.sidebarProduct}>{CONSOLE.product}</span>
         </Link>
         <nav className={styles.navScroll} aria-label="Console">
-          {GROUPS.map((group) => (
-            <div key={group.label} className={styles.navGroup}>
-              <p className={styles.navGroupLabel}>{group.label}</p>
+          {GROUPS.map((group, index) => (
+            <div key={index} className={styles.navGroup}>
+              {group.label && <p className={styles.navGroupLabel}>{group.label}</p>}
               {group.links.map(({ href, label, Icon, count }) => {
                 const current = href === "/console" ? pathname === "/console" : pathname.startsWith(href);
                 const value = count ? counts[count] : 0;
@@ -91,10 +92,15 @@ export function ConsoleShell({ counts, today, healthy, alerts, banner, children 
           <button type="button" className={styles.menuButton} onClick={() => setOpen((value) => !value)} aria-label={open ? CONSOLE.nav.close : CONSOLE.nav.menu} aria-expanded={open}>
             {open ? <CloseIcon size={20} /> : <MenuIcon size={20} />}
           </button>
+          {/* On a narrow screen the sidebar's logo is behind the menu, so the bar carries the mark. */}
+          <Link href="/console" className={styles.topbarMark} aria-label={CONSOLE.nav.overview}>
+            <Image src="/icon.png" alt="" width={26} height={26} />
+          </Link>
           <span className={styles.topbarDate}>{today}</span>
           <Link href="/console/alerts" className={styles.health} data-tone={healthy ? "good" : "bad"}>
             <span className={styles.healthDot} aria-hidden="true" />
-            {healthy ? CONSOLE.health.good : CONSOLE.health.attention(alerts)}
+            <span className={styles.healthLong}>{healthy ? CONSOLE.health.good : CONSOLE.health.attention(alerts)}</span>
+            <span className={styles.healthShort}>{healthy ? CONSOLE.health.goodShort : CONSOLE.health.attentionShort(alerts)}</span>
           </Link>
         </header>
         {banner}

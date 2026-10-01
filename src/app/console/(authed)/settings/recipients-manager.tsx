@@ -140,15 +140,23 @@ export function RecipientsManager({ initial }: { initial: Recipient[] }) {
               <div key={recipient.id} className={styles.recipient} data-paused={recipient.active ? "false" : "true"}>
                 <div className={styles.person}>
                   <Avatar name={recipient.name ?? recipient.email} />
-                  <div style={{ minWidth: 0 }}>
-                    <span className={styles.cellStrong} style={{ overflowWrap: "anywhere" }}>
-                      {recipient.name ?? recipient.email}
-                    </span>
-                    <span className={styles.cellSub}>
-                      {recipient.name ? `${recipient.email} · ` : ""}
+                  {/* The name and its state on one line, the address on its own below: nothing wraps mid-row. */}
+                  <div className={styles.personText}>
+                    <span className={styles.personName}>
+                      <span className={styles.cellStrong}>{recipient.name ?? recipient.email.split("@")[0]}</span>
                       <Badge tone={recipient.active ? "good" : "neutral"} dot>
                         {recipient.active ? n.active : n.paused}
                       </Badge>
+                    </span>
+                    {/* A long address wraps after the @, never mid-word. */}
+                    <span className={styles.personEmail}>
+                      {recipient.email.split("@")[0]}
+                      {recipient.email.includes("@") && (
+                        <>
+                          @<wbr />
+                          {recipient.email.split("@").slice(1).join("@")}
+                        </>
+                      )}
                     </span>
                   </div>
                 </div>

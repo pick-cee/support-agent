@@ -4,9 +4,11 @@ import { ALERT_UNDELIVERED_BANNER_MINUTES, EVAL_RUN_STOPPED_AFTER_MINUTES } from
 import { queryDb } from "@/lib/db";
 
 // What the console shows (DESIGN §14). Read-only, except the escalation status
-// change. "Today" is midnight to now in Lagos.
+// change. "Today" is midnight to now in Lagos; the Overview's window is the
+// last CONSOLE_OVERVIEW_DAYS Lagos days, today included.
 
 const TODAY = `(date_trunc('day', now() at time zone 'Africa/Lagos') at time zone 'Africa/Lagos')`;
+const WINDOW_START = `((date_trunc('day', now() at time zone 'Africa/Lagos') - make_interval(days => $1::int - 1)) at time zone 'Africa/Lagos')`;
 
 /** Customers reach support by a web call, a phone call or typing on the page. */
 const CUSTOMER_CHANNELS = `('web', 'phone', 'text')`;
@@ -24,16 +26,18 @@ function percentile(values: number[], p: number): number | null {
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))]!;
 }
 
-export type TodayStats = {
+export type OverviewStats = {
   conversations: number;
+  today: number;
   voice: number;
   typed: number;
   finished: number;
   resolvedWithoutHuman: number;
   openEscalations: number;
   callsBooked: number;
-  alertsToday: number;
-  criticalToday: number;
+  nextCallback: { at: string; timezone: string } | null;
+  alerts: number;
+  critical: number;
   firstTextP50: number | null;
   firstTextP95: number | null;
   vapiTurnP50: number | null;
@@ -42,51 +46,62 @@ export type TodayStats = {
   vapiCostUsd: number;
 };
 
-export async function todayStats(): Promise<TodayStats> {
+/** The Overview's numbers over the last `days` Lagos days: a quiet morning still shows the week. */
+export async function overviewStats(days: number): Promise<OverviewStats> {
   const [conversations, escalations, alerts, turns, reports] = await Promise.all([
-    queryDb<{ total: number; voice: number; typed: number; finished: number; resolved: number; agent: string; vapi: string }>(
+    queryDb<{ total: number; today: number; voice: number; typed: number; finished: number; resolved: number; agent: string; vapi: string }>(
       `select count(*)::int as total,
+              count(*) filter (where created_at >= ${TODAY})::int as today,
               count(*) filter (where channel in ('web', 'phone'))::int as voice,
               count(*) filter (where channel = 'text')::int as typed,
               count(*) filter (where final_status is not null)::int as finished,
               count(*) filter (where final_status = 'resolved')::int as resolved,
               coalesce(sum(agent_cost_estimate_usd), 0)::text as agent,
               coalesce(sum(vapi_cost_usd), 0)::text as vapi
-         from support_agent.conversations where channel in ${CUSTOMER_CHANNELS} and created_at >= ${TODAY}`,
+         from support_agent.conversations where channel in ${CUSTOMER_CHANNELS} and created_at >= ${WINDOW_START}`,
+      [days],
     ),
-    queryDb<{ open: number; booked: number }>(
+    queryDb<{ open: number; booked: number; next_at: string | null; next_zone: string | null }>(
       `select count(*) filter (where e.status <> 'closed')::int as open,
-              count(*) filter (where e.status <> 'closed' and e.call_booked and e.appointment_time >= now())::int as booked
+              count(*) filter (where e.status <> 'closed' and e.call_booked and e.appointment_time >= now())::int as booked,
+              (array_agg(e.appointment_time::text order by e.appointment_time) filter (where e.status <> 'closed' and e.call_booked and e.appointment_time >= now()))[1] as next_at,
+              (array_agg(e.timezone order by e.appointment_time) filter (where e.status <> 'closed' and e.call_booked and e.appointment_time >= now()))[1] as next_zone
          from support_agent.escalations e where ${NOT_EVAL_ESCALATION}`,
     ),
     queryDb<{ n: number; critical: number }>(
       `select count(*)::int as n, count(*) filter (where severity = 'critical')::int as critical
-         from support_agent.alerts where last_seen >= ${TODAY} and severity <> 'info'`,
+         from support_agent.alerts where last_seen >= ${WINDOW_START} and severity <> 'info'`,
+      [days],
     ),
     queryDb<{ ttft_ms: number }>(
       `select t.ttft_ms from support_agent.conversation_turns t join support_agent.conversations c on c.id = t.conversation_id
-        where c.channel in ('web', 'phone') and t.created_at >= ${TODAY} and t.ttft_ms is not null`,
+        where c.channel in ('web', 'phone') and t.created_at >= ${WINDOW_START} and t.ttft_ms is not null`,
+      [days],
     ),
     queryDb<{ latency: number }>(
       `select (turn ->> 'turnLatency')::float as latency
          from support_agent.conversations c
          cross join lateral jsonb_array_elements(coalesce(c.raw_end_report #> '{artifact,performanceMetrics,turnLatencies}', '[]'::jsonb)) as turn
-        where c.created_at >= ${TODAY} and turn ? 'turnLatency'`,
+        where c.created_at >= ${WINDOW_START} and turn ? 'turnLatency'`,
+      [days],
     ),
   ]);
   const c = conversations.rows[0]!;
+  const e = escalations.rows[0]!;
   const firstText = turns.rows.map((row) => row.ttft_ms);
   const vapi = reports.rows.map((row) => row.latency);
   return {
     conversations: c.total,
+    today: c.today,
     voice: c.voice,
     typed: c.typed,
     finished: c.finished,
     resolvedWithoutHuman: c.resolved,
-    openEscalations: escalations.rows[0]!.open,
-    callsBooked: escalations.rows[0]!.booked,
-    alertsToday: alerts.rows[0]!.n,
-    criticalToday: alerts.rows[0]!.critical,
+    openEscalations: e.open,
+    callsBooked: e.booked,
+    nextCallback: e.next_at ? { at: e.next_at, timezone: e.next_zone ?? "Africa/Lagos" } : null,
+    alerts: alerts.rows[0]!.n,
+    critical: alerts.rows[0]!.critical,
     firstTextP50: percentile(firstText, 50),
     firstTextP95: percentile(firstText, 95),
     vapiTurnP50: percentile(vapi, 50),
@@ -360,6 +375,9 @@ export type GapGroup = { section: string; count: number; examples: string[] };
 /**
  * Declined and unsupported questions, grouped by the nearest knowledge-base
  * section the search found, or "no match" (DESIGN §1: the knowledge-base backlog).
+ * Only questions the assistant searched for: a refusal made without a search
+ * is a rule doing its job (someone asking for another customer's email), not
+ * an answer the team should write.
  */
 export async function knowledgeGaps(): Promise<GapGroup[]> {
   const result = await queryDb<{ user_text: string; section: string | null }>(
@@ -370,6 +388,7 @@ export async function knowledgeGaps(): Promise<GapGroup[]> {
        from support_agent.conversation_turns t
        join support_agent.conversations c on c.id = t.conversation_id
       where c.channel in ('web', 'phone', 'text', 'eval')
+        and exists (select 1 from support_agent.retrieval_logs r where r.turn_id = t.id)
         and (t.answer_type = 'decline'
              or exists (select 1 from support_agent.retrieval_logs r where r.turn_id = t.id and not r.found))
       order by t.created_at desc limit 500`,

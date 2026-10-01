@@ -1,4 +1,5 @@
-import { EMAIL } from "@/app/copy";
+import { describeTools } from "@/app/console/describe";
+import { categoryLabel, CONSOLE, EMAIL } from "@/app/copy";
 import { BUSINESS_TIMEZONE } from "@/lib/constants";
 import { renderEmail, type Attachment } from "@/lib/email/template";
 import { speakSlot, zoneSpokenName } from "@/lib/zones";
@@ -45,15 +46,26 @@ export function buildHandoffEmail(input: HandoffInput): { subject: string; text:
   const bookedAt = escalation.call_booked && escalation.appointment_time ? escalation.appointment_time : null;
   const bookedSpoken = bookedAt ? speakSlot(new Date(bookedAt), zone) : null;
 
-  const subject = copy.subject(escalation.escalation_ref, escalation.category, customer?.company_name ?? copy.unverified, bookedAt ? shortTime(bookedAt, zone) : null);
+  const category = categoryLabel(escalation.category);
+  const subject = copy.subject(escalation.escalation_ref, category, customer?.company_name ?? copy.unverified, bookedAt ? shortTime(bookedAt, zone) : null);
 
+  const lookedUp = describeTools(input.toolCalls).map((action) =>
+    copy.lookedUp(action.label, action.reference, action.tone === "good" ? null : action.result, action.count > 1 ? CONSOLE.conversation.times(action.count) : null),
+  );
   const why = escalation.booking_status === "not_requested" ? copy.noTimeChosen : (escalation.booking_error ?? escalation.booking_status);
   const rendered = renderEmail({
     preheader: `${escalation.user_name}: ${escalation.reason}`.slice(0, 140),
     badge: { text: copy.badge(escalation.escalation_ref), tone: "brand" },
     title: copy.title(customer?.company_name ?? null),
-    intro: bookedSpoken ? copy.introBooked(bookedSpoken) : copy.introNotBooked,
+    intro: copy.intro,
     blocks: [
+      {
+        kind: "highlight",
+        tone: bookedSpoken ? "brand" : "warning",
+        label: bookedSpoken ? copy.highlight.booked : copy.highlight.notBooked,
+        value: bookedSpoken ?? copy.highlight.arrange,
+        note: copy.highlight.note(escalation.ticket_ref, category),
+      },
       {
         kind: "facts",
         heading: copy.headings.caller,
@@ -68,7 +80,7 @@ export function buildHandoffEmail(input: HandoffInput): { subject: string; text:
         kind: "facts",
         heading: copy.headings.why,
         rows: [
-          [copy.labels.category, escalation.category],
+          [copy.labels.category, category],
           [copy.labels.reason, escalation.reason],
           [copy.labels.ticket, escalation.ticket_ref],
         ],
@@ -78,7 +90,8 @@ export function buildHandoffEmail(input: HandoffInput): { subject: string; text:
       {
         kind: "lines",
         heading: copy.headings.lookedUp,
-        lines: input.toolCalls.length ? input.toolCalls.map((call) => `${call.tool_name}: ${call.status}${call.result_summary ? `, ${call.result_summary}` : ""}`) : [copy.noLookups],
+        // In words, as the console shows them: never a tool name or a raw record value.
+        lines: lookedUp.length ? lookedUp : [copy.noLookups],
       },
       {
         kind: "facts",

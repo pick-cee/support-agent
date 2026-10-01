@@ -1,19 +1,24 @@
 import Link from "next/link";
 
 import { CONSOLE } from "@/app/copy";
-import { CalendarIcon } from "@/app/icons";
+import { CalendarIcon, CheckCircleIcon } from "@/app/icons";
 import { age, whenWithZone } from "@/lib/console/format";
 import { escalationsQueue } from "@/lib/console/queries";
 
 import styles from "../../console.module.css";
 import { Avatar, StatusText, statusTone } from "../../parts";
+import { InboxPlaceholder } from "../conversations/inbox";
+import { EscalationArticle } from "./escalation-article";
 
 // The escalation queue as an inbox (DESIGN §14): soonest callback first on the
-// left, the case beside it with everything needed before calling back.
-export async function EscalationInbox({ all, activeId, children }: { all: boolean; activeId: string | null; children: React.ReactNode }) {
+// left, the case beside it with everything needed before calling back. With
+// nothing chosen, a wide screen opens the first case; a narrow one shows the list.
+export async function EscalationInbox({ all, activeId, children }: { all: boolean; activeId: string | null; children?: React.ReactNode }) {
   const rows = await escalationsQueue(all);
   const e = CONSOLE.escalations;
   const suffix = all ? "?all=1" : "";
+  const previewId = activeId ? null : (rows[0]?.id ?? null);
+  const shownId = activeId ?? previewId;
   return (
     <div className={styles.inbox} data-has-detail={activeId ? "true" : "false"}>
       <section className={styles.inboxList} aria-labelledby="inbox-heading">
@@ -41,7 +46,7 @@ export async function EscalationInbox({ all, activeId, children }: { all: boolea
           <ul className={styles.inboxItems}>
             {rows.map((row) => (
               <li key={row.id}>
-                <Link href={`/console/escalations/${row.id}${suffix}`} className={styles.inboxItem} aria-current={row.id === activeId ? "page" : undefined}>
+                <Link href={`/console/escalations/${row.id}${suffix}`} className={styles.inboxItem} aria-current={row.id === activeId ? "page" : row.id === shownId ? "true" : undefined}>
                   <Avatar name={row.user_name} tone="accent" />
                   <span className={styles.inboxItemBody}>
                     <span className={styles.inboxItemTop}>
@@ -67,7 +72,13 @@ export async function EscalationInbox({ all, activeId, children }: { all: boolea
           </ul>
         )}
       </section>
-      <section className={styles.inboxDetail}>{children}</section>
+      <section className={styles.inboxDetail}>
+        {previewId ? (
+          <EscalationArticle id={previewId} showAll={all} />
+        ) : (
+          (children ?? <InboxPlaceholder icon={<CheckCircleIcon size={22} />} title={all ? e.emptyAll : e.caughtUp} text={all ? e.emptyAllHint : e.empty} />)
+        )}
+      </section>
     </div>
   );
 }

@@ -1116,12 +1116,19 @@ alerts and the test email.
 - Table layout and inline styles, 600 px wide, because mail clients ignore
   most CSS. Every email has a plain-text part with the same content.
 - All strings in `copy.ts` (`EMAIL`); everything interpolated is escaped.
-- Subject: `[Escalation E-2093] account · LagosLedger · callback Tue 6 Oct 14:00 WAT`.
+- Subject: `[Escalation E-2093] Account · LagosLedger · callback Tue 6 Oct 14:00 Lagos time`.
+  Categories read as words ("Account"), in the email and the console.
 - Body, in this order:
+  - **The callback**, in a tinted panel at the top (2026-10-01, §20): "Callback
+    booked" and the time, or "No callback booked yet" and to email the
+    customer, with the ticket and category under it.
   - **Caller:** name, email, and "verified as CUS-1001" or "not verified".
   - **Why:** the escalation reason and the caller's last three utterances.
   - **What we already told them:** the last two spoken replies.
-  - **What we looked up:** each tool call with its status.
+  - **What we looked up:** in words, as the console shows it ("Checked who
+    the customer is: CUS-1003", "Found callback times, 2 times"). It had
+    printed tool names and raw values (`lookup_customer: ok, ...`,
+    `2026-10-06T13:00:00.000Z`).
   - **Booking:** the booked time with the Cal.com link, or "not booked:
     reason".
   - **Console:** a link to the conversation.
@@ -1308,10 +1315,15 @@ Route `/`. It follows the brand direction Google Doc exactly.
   - one centred column, 760 px at most, that scrolls on its own
   - the composer docked at the bottom: the message box, a **Call** button
     and a send button. Typing and calling start from the same place.
-  - before the first message: the RelayPay mark, "How can we help today?",
-    one lead sentence, three suggestion cards from the test scenarios, and
-    the three promises (approved answers, payment checks, a specialist when
-    needed) as one quiet row
+  - before the first message, **voice first** (redesigned 2026-10-01 at
+    Akin's request, §20): "AI support assistant" above "Talk to RelayPay
+    support", one lead sentence, then one large deep-blue button to start a
+    call, in the same orb the call itself uses, so pressing it carries
+    straight on. Sound arcs either side light up in turn, slowly. Under it, a
+    hint that references can be said aloud, three common questions from the
+    test scenarios as small chips (each sends its full question), and the
+    three promises (approved answers, payment and payout checks, a
+    specialist) as one quiet row. The logo appears once, in the header.
   - it fills the screen on a phone, with the composer above the keyboard
 - **Disclosure** under the composer, always visible: "You're talking to an
   AI assistant. Conversations are logged for quality and follow-up."
@@ -1400,17 +1412,20 @@ instead of speaking. It is the same product, not a second one:
     `globals.css`, and the orb's frame loop does not start)
 - **Motion, added 2026-09-30 at Akin's request (§20).** Calm, short and
   purposeful, never decorative for its own sake:
-  - on load, the mark, heading, suggestions and composer rise into place
-    once, staggered by about 60 ms, in about half a second; suggestion cards
-    lift on hover
-  - an "Available now" label with a slow accent ping, the page's one
-    continuous motion
+  - on load, the heading, the talk button, the chips and the composer rise
+    into place once, staggered by about 60 ms, in about half a second; the
+    talk button and the chips lift on hover
+  - two slow continuous motions: the "Available now" ping, and the sound
+    arcs beside the talk button lighting up in turn (3.2 s a cycle, faster
+    while the pointer is on the button); still under reduced motion
   - the voice orb: three rings around the microphone that grow with the
     volume of whoever is talking (Vapi's `volume-level` and
     `local-volume-level` events, eased into a CSS variable, not through
     React), accent while the customer talks and deep blue while the assistant
     does, a slow breath while connecting, still when idle. The frame loop runs
-    only while a call is live.
+    only while a call is live. Its core is the welcome's deep blue while
+    connecting and while the assistant speaks, white with the accent while
+    the customer has the floor, and a quiet grey once the call is over.
   - the customer's message slides in from the right, a reply fades in word
     by word, the "Checking" dots pulse while a reply is on its way, and the
     send button pops when there is something to send
@@ -1462,13 +1477,19 @@ actions.
 
 **Layout (redesigned 2026-09-30, §20).**
 
-- A fixed sidebar with the logo, navigation in four groups (Overview, Work,
-  Improve, System) with an icon beside every label, and live counts on
-  Escalations (open, customer only) and Alerts. Under 1024 px it becomes a
-  drawer behind a menu button, closed by Escape, the backdrop or a link.
-- A top bar with the page title, today's date in Lagos, and a health pill:
-  "All systems normal", or how many warning and critical alerts were seen in
-  the last 24 hours, linking to them.
+- A fixed sidebar with the logo, Overview on its own at the top, then
+  navigation in three groups (Work, Improve, System) with an icon beside
+  every label, and live counts on Escalations (open, customer only) and
+  Alerts. Under 1024 px it becomes a drawer behind a menu button, closed by
+  Escape, the backdrop or a link, and the top bar carries the RelayPay mark.
+- A top bar with today's date in Lagos and a health pill: "All systems
+  normal", or how many warning and critical alerts were seen in the last 24
+  hours, linking to them. Under 600 px the date gives way and the pill
+  shortens ("1 alert").
+- Sign in (redesigned 2026-10-01, §20): on a wide screen, a solid deep-blue
+  panel with the mark, what the console is for in three lines, and the
+  customer page's sound arcs as white hairlines; the form beside it. On a
+  phone, the form alone.
 - A red banner across every page when an alert could not be delivered, or
   when nobody is set to receive escalation emails.
 - Motion is short and calm: content rises in on load, toasts slide in, a
@@ -1478,30 +1499,36 @@ actions.
   chosen, with a toast; switches and forms do the same.
 
 **Test runs never look like work.** Eval runs write real records, so the
-queue and the Today numbers leave out escalations and conversations from eval
-runs. The conversation list shows customer channels by default, with a filter
-for each channel, eval included.
+queue and the Overview's numbers leave out escalations and conversations from
+eval runs. The conversation list shows customer channels by default, with a
+filter for each channel, eval included.
 
-1. **Today.**
+1. **Overview** (was "Today"; changed 2026-10-01 at Akin's request, §20).
+   It covers the last `CONSOLE_OVERVIEW_DAYS` (7) Lagos days, today
+   included: on "since midnight", a demo or a quiet morning showed zeros and
+   "No data yet" everywhere. Designed to read well with three conversations,
+   with no demo records (Akin declined them).
    - A greeting for the time of day in Lagos.
    - "Finish setting up", shown only while something is missing: someone to
      receive emails, voice calls switched on, the help content loaded. One
      quiet card with a progress bar ("2 of 3 done"); done items are struck
      through.
-   - Four cards: conversations today (by voice and typed), the share solved
-     by the assistant of those finished, open escalations with callbacks
-     booked, and alerts today with how many are critical.
-   - Customer conversations per day for the last 14 days, Lagos days, as
-     bars split by how they ended (solved, ticket, escalated, other), with a
-     key. The scale never drops below `CONSOLE_CHART_MIN_SCALE` (4), with
-     dashed gridlines, so one conversation on a quiet day is a short bar,
-     not a full-height block. Plain CSS, no chart library.
+   - Four cards, two to a row on a phone: conversations (by voice and typed,
+     and how many today), the share solved by the assistant of those
+     finished, open escalations with callbacks booked and the next callback
+     time, and alerts with how many are critical.
+   - Customer conversations per day, Lagos days, as bars split by how they
+     ended (solved, ticket, escalated, other). A day with none keeps its
+     place as a short grey stub, so a quiet week reads as quiet, not broken.
+     The scale never drops below `CONSOLE_CHART_MIN_SCALE` (4), with dashed
+     gridlines. Beside it, "How they ended": one bar split by outcome, with
+     each count and share. Plain CSS, no chart library.
    - "Needs a person": the soonest open escalations, each opening its case.
      "Latest conversations": the six most recent, the customer's first words
      first, then outcome and channel.
-   - Speed and cost: first reply on a call and voice reply time, typical and
-     slowest 5%; the AI cost estimate and the voice call bill, side by side
-     and labelled, never added together.
+   - Speed and cost: first reply on a call and voice reply time, the typical
+     figure large and the slowest 5% under it; the AI cost estimate and the
+     voice call bill, side by side and labelled, never added together.
 
    **Conversations and Escalations are inboxes** (redesigned 2026-09-30 at
    Akin's request, §20): the list stays on the left (360 px), and the item
@@ -1510,7 +1537,10 @@ for each channel, eval included.
    pane shows at a time, with a way back. The first version had a third
    column of detail panels; Akin found it cramped ("too many things
    happening"), so each item now reads top to bottom: a header, one summary
-   card, then the conversation.
+   card, then the conversation. With nothing chosen, a wide screen opens the
+   newest conversation, or the soonest case, rather than an empty pane
+   (2026-10-01, §20); a phone still starts on the list. An empty queue says
+   "All caught up".
 2. **Escalations.**
    - The queue, soonest callback first: the person and company, the reason in
      two lines, the status as a dot and a word, and the callback time.
@@ -1528,7 +1558,8 @@ for each channel, eval included.
    Search matches anything either side said; channel filters wrap. A
    conversation: its first words as the title, a summary card (the outcome,
    what happened as a row of steps such as "Looked up a transaction
-   TXN-9001", the customer, replies, first reply time, AI cost, how it
+   TXN-9001", the same step on the same record shown once with a count, "Found
+   callback times, 4 times", the customer, replies, first reply time, AI cost, how it
    ended, and a link to any escalation), then the conversation as the
    customer saw it: their words on the right, the assistant's on the left,
    one quiet line under each reply (what kind of reply, how long it took,
@@ -1537,7 +1568,10 @@ for each channel, eval included.
    help articles searched and used, safety checks, and any reply a check
    held back, marked as never sent.
 4. **Knowledge.** Three tabs (§8):
-   - Questions to answer: the gaps, grouped, each with "Answer this".
+   - Questions to answer: the gaps, grouped, each with "Answer this". Only
+     questions the assistant searched for count: a refusal made without a
+     search is a rule doing its job (a test asking for another customer's
+     email was listed as a question to answer), not a gap (2026-10-01, §20).
    - Team answers, and service notices with their end dates: each on or
      off, with how many answers have cited it. "Add" opens a form in a
      dialog.
@@ -1959,6 +1993,7 @@ These go in the one-pager and the reflection, named before a grader finds them.
 | 2026-09-30 | `endCallPhrases` is "thanks for calling RelayPay" (`END_CALL_PHRASE`), the tail of the goodbye, not the whole sentence (§6.4, §12.1). | Vapi matches its transcription of the audio, which never matched the full sentence (FAILURES 47). | Synced and read back; six harness calls in a row ended with `assistant-said-end-call-phrase`. |
 | 2026-09-30 | The call screen shows a live transcript of both sides that stays after the call, with a Mute button; the single live caption is gone (§13). The assistant's side comes from Vapi's `voice-input` message (added to `clientMessages`, §12.1). | Akin: "We should see transcript of both sides, it should not disappear." | Harness calls through the dev server: both sides shown, exact assistant text and greeting, TXN-9001 as a chip, and the ended state kept after the goodbye (FAILURES 49). `use-voice-call.test.ts` for the display formatting. Checked in Edge at 1366 px only; mute was not exercised in a call. |
 | 2026-09-30 | Vapi's `hang` writes an event on the call, as §15 always said (it had not been written). The `vapi_hang` alert is one shared alert, raised only when `HANG_ALERT_MIN_CALLS` different calls went quiet within `HANG_ALERT_WINDOW_MINUTES`, instead of one alert and one email per call (§11, §15). | Akin was emailed "A voice call went quiet" after every test call and asked for it to be fixed (FAILURES 50). One slow reply is nothing the team can act on; calls going quiet again and again is. | `call-hangs.test.ts`; the insert and the count ran against the real schema in a rolled-back transaction (a call that hung twice counts once). Not yet seen on a live call. |
+| 2026-10-01 | Final-week presentation round, chosen by Akin from options: the customer page's welcome is voice first, one large talk button in the call's own orb (§13); the console's Today becomes a 7-day Overview with how conversations ended (§14); inboxes open the first item on a wide screen; sign in gets a brand panel; the handoff email leads with the callback and says what was looked up in words (§10.3). Repeated steps are counted once; the knowledge backlog counts only questions that were searched for; categories read as words. | Akin: "I want to go out with a bang." He chose voice first, and good design with little data over demo records. The handoff email still printed tool names, which the plain-language rule (§14) had missed. | Screenshots in Edge at 1440 px and 390 px of every page, no sideways scroll; the call screen connecting and failing with Vapi held or refused in the browser, and a typed conversation with fixed replies, so neither placed a call nor wrote a record. `handoff-email.test.ts` checks no tool names or raw timestamps. No real call was placed with the new page. |
 
 Record every departure from this document here, in the same piece of work as
 the code change.
@@ -2001,7 +2036,8 @@ replaced with measured values, with the measurement noted.
 | `RELATED_TOP_K`                        | 3                                | Related sections returned when nothing is found             |
 | `MIGRATION_CONNECT_TIMEOUT_MS`         | 10000                            | Migrations at server start give up on an unreachable database |
 | `OUTBOX_LOCAL_INTERVAL_MS`             | 60000                            | The outbox worker off Vercel (§10.1)                        |
-| `CONSOLE_CHART_MIN_SCALE`              | 4                                | The Today chart's smallest scale, so a quiet day isn't a spike (§14) |
+| `CONSOLE_CHART_MIN_SCALE`              | 4                                | The Overview chart's smallest scale, so a quiet day isn't a spike (§14) |
+| `CONSOLE_OVERVIEW_DAYS`                | 7                                | The Overview's window, today included, so a quiet morning still shows the week (§14) |
 | `EMBEDDING_MODEL`                      | `text-embedding-3-small`         |                                                             |
 | `CALLBACK_DURATION_MIN`                | 30                               | Matches the Cal.com event type                              |
 | `SLOT_ALTERNATIVES`                    | 2                                |                                                             |

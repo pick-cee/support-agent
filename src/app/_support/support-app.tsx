@@ -88,7 +88,7 @@ export function SupportApp({ publicKey, assistantId }: { publicKey: string; assi
           {call.open ? (
             <CallView phase={call.phase} lines={call.lines} summary={call.summary} startedAt={call.startedAt} busy={call.busy} muted={call.muted} orbRef={call.orbRef} />
           ) : !chat.started ? (
-            <Welcome onPick={(question) => void chat.send(question)} disabled={chat.pending} />
+            <Welcome onPick={(question) => void chat.send(question)} onCall={startCall} disabled={chat.pending} />
           ) : (
             <div className={styles.conversation} role="log" aria-live="polite" aria-relevant="additions" aria-label={PAGE.text.logLabel}>
               <p className={styles.divider}>

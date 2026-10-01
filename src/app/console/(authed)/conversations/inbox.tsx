@@ -7,6 +7,7 @@ import { conversationsList } from "@/lib/console/queries";
 
 import styles from "../../console.module.css";
 import { channelLabel, outcomeLabel, outcomeTone, StatusText } from "../../parts";
+import { ConversationArticle } from "./conversation-article";
 
 export const CHANNELS = ["web", "phone", "text", "mcp_direct", "eval"];
 
@@ -32,9 +33,13 @@ export function queryString({ channel, search }: InboxQuery, change: Partial<Inb
 
 // The conversations inbox (DESIGN §14): the list stays on the left, the
 // conversation opens beside it. On a narrow screen one or the other shows.
-export async function ConversationInbox({ query, activeId, children }: { query: InboxQuery; activeId: string | null; children: React.ReactNode }) {
+// With nothing chosen, a wide screen opens the newest one rather than an
+// empty pane; a narrow screen still starts on the list.
+export async function ConversationInbox({ query, activeId, children }: { query: InboxQuery; activeId: string | null; children?: React.ReactNode }) {
   const rows = await conversationsList(query.channel, query.search);
   const c = CONSOLE.conversations;
+  const previewId = activeId ? null : (rows[0]?.id ?? null);
+  const shownId = activeId ?? previewId;
   return (
     <div className={styles.inbox} data-has-detail={activeId ? "true" : "false"}>
       <section className={styles.inboxList} aria-labelledby="inbox-heading">
@@ -76,7 +81,7 @@ export async function ConversationInbox({ query, activeId, children }: { query: 
               const refs = [...row.escalations, ...row.tickets];
               return (
                 <li key={row.id}>
-                  <Link href={`/console/conversations/${row.id}${queryString(query)}`} className={styles.inboxItem} aria-current={row.id === activeId ? "page" : undefined}>
+                  <Link href={`/console/conversations/${row.id}${queryString(query)}`} className={styles.inboxItem} aria-current={row.id === activeId ? "page" : row.id === shownId ? "true" : undefined}>
                     <span className={styles.channelIcon} title={channelLabel(row.channel)}>
                       <Icon size={16} />
                     </span>
@@ -101,7 +106,13 @@ export async function ConversationInbox({ query, activeId, children }: { query: 
           </ul>
         )}
       </section>
-      <section className={styles.inboxDetail}>{children}</section>
+      <section className={styles.inboxDetail}>
+        {previewId ? (
+          <ConversationArticle id={previewId} query={query} />
+        ) : (
+          (children ?? <InboxPlaceholder icon={<ChatIcon size={22} />} title={query.search ? c.noMatch(query.search) : c.empty} text={c.emptyHint} />)
+        )}
+      </section>
     </div>
   );
 }

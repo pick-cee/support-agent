@@ -1,14 +1,14 @@
 import Link from "next/link";
 
-import { CONSOLE } from "@/app/copy";
+import { categoryLabel, CONSOLE } from "@/app/copy";
 import { ArrowRightIcon, BellIcon, ChatIcon, CheckCircleIcon, ClockIcon, FlagIcon, KeyboardIcon, PhoneIcon } from "@/app/icons";
-import { CONSOLE_CHART_MIN_SCALE } from "@/lib/constants";
+import { CONSOLE_CHART_MIN_SCALE, CONSOLE_OVERVIEW_DAYS } from "@/lib/constants";
 import { age, lagosDayPart, ms, shortDay, usd, whenWithZone } from "@/lib/console/format";
-import { dailyActivity, escalationsQueue, knowledgeCounts, recentConversations, todayStats, type DayActivity } from "@/lib/console/queries";
+import { dailyActivity, escalationsQueue, knowledgeCounts, overviewStats, recentConversations, type DayActivity } from "@/lib/console/queries";
 import { coverage } from "@/lib/notifications";
 
 import styles from "../console.module.css";
-import { Avatar, Card, channelLabel, Empty, outcomeLabel, outcomeTone, PageHeader, StatusText, statusTone, words } from "../parts";
+import { Avatar, Card, channelLabel, Empty, outcomeLabel, outcomeTone, PageHeader, StatusText, statusTone } from "../parts";
 
 const SEGMENTS: (keyof Omit<DayActivity, "day">)[] = ["resolved", "ticket_created", "escalated", "other"];
 const LEGEND: Record<(typeof SEGMENTS)[number], string> = { resolved: CONSOLE.outcomes.resolved!, ticket_created: CONSOLE.outcomes.ticket_created!, escalated: CONSOLE.outcomes.escalated!, other: CONSOLE.outcomes.open! };
@@ -24,10 +24,9 @@ function scaleTop(max: number): number {
 
 function ActivityChart({ days }: { days: DayActivity[] }) {
   const totals = days.map((day) => SEGMENTS.reduce((sum, key) => sum + day[key], 0));
-  if (totals.every((total) => total === 0)) return <Empty icon={<ChatIcon size={20} />}>{CONSOLE.today.activity.empty}</Empty>;
   const top = scaleTop(Math.max(...totals));
   return (
-    <>
+    <div className={styles.chartBlock} style={{ "--days": days.length } as React.CSSProperties}>
       <div className={styles.chartFrame}>
         <div className={styles.chartGrid} aria-hidden="true">
           {[top, top / 2, 0].map((value) => (
@@ -40,34 +39,60 @@ function ActivityChart({ days }: { days: DayActivity[] }) {
           {days.map((day, index) => (
             <div key={day.day} className={styles.barSlot}>
               {totals[index] ? (
-                <div className={styles.bar} style={{ height: `${(totals[index]! / top) * 100}%`, animationDelay: `${index * 30}ms` }} title={`${shortDay(day.day)}: ${totals[index]}`}>
+                <div className={styles.bar} style={{ height: `${(totals[index]! / top) * 100}%`, animationDelay: `${index * 40}ms` }} title={`${shortDay(day.day)}: ${totals[index]}`}>
                   {SEGMENTS.map((key) => (day[key] ? <span key={key} className={styles.barSegment} data-kind={key} style={{ flexGrow: day[key] }} /> : null))}
                 </div>
-              ) : null}
+              ) : (
+                // A day with none still has its place: a quiet week reads as quiet, not broken.
+                <div className={styles.barNone} title={`${shortDay(day.day)}: 0`} />
+              )}
             </div>
           ))}
         </div>
       </div>
       <div className={styles.chartDays} aria-hidden="true">
         {days.map((day, index) => (
-          <span key={day.day}>{index % 2 === 1 || index === days.length - 1 ? shortDay(day.day) : ""}</span>
+          <span key={day.day}>{days.length <= 7 || index % 2 === 1 || index === days.length - 1 ? shortDay(day.day) : ""}</span>
         ))}
       </div>
-      <ul className={styles.legend}>
-        {SEGMENTS.map((key) => (
-          <li key={key}>
-            <span className={styles.swatch} style={{ background: SWATCH[key] }} aria-hidden="true" />
-            {LEGEND[key]}
+    </div>
+  );
+}
+
+/** How the window's conversations ended: one bar split by outcome, with counts. Reads as clearly with three conversations as with three hundred. */
+function Outcomes({ days }: { days: DayActivity[] }) {
+  const counts = SEGMENTS.map((key) => ({ key, count: days.reduce((sum, day) => sum + day[key], 0) }));
+  const total = counts.reduce((sum, item) => sum + item.count, 0);
+  const a = CONSOLE.today.activity;
+  return (
+    <div className={styles.outcomes}>
+      <p className={styles.outcomesLabel}>{a.outcomes}</p>
+      <div className={styles.outcomeBar} role="img" aria-label={counts.map((item) => `${LEGEND[item.key]}: ${item.count}`).join(", ")}>
+        {counts.map((item) => (item.count ? <span key={item.key} data-kind={item.key} style={{ flexGrow: item.count }} /> : null))}
+      </div>
+      <ul className={styles.outcomeList}>
+        {counts.map((item) => (
+          <li key={item.key} data-zero={item.count ? "false" : "true"}>
+            <span className={styles.swatch} style={{ background: SWATCH[item.key] }} aria-hidden="true" />
+            <span className={styles.outcomeName}>{LEGEND[item.key]}</span>
+            <span className={styles.outcomeCount}>{a.share(item.count, Math.round((item.count / total) * 100))}</span>
           </li>
         ))}
       </ul>
-    </>
+    </div>
   );
 }
 
 // Scannable first (DESIGN §14): numbers and status lead; detail is one click away.
-export default async function Today() {
-  const [stats, open, days, recent, reach, knowledge] = await Promise.all([todayStats(), escalationsQueue(false), dailyActivity(14), recentConversations(6), coverage(), knowledgeCounts()]);
+export default async function Overview() {
+  const [stats, open, days, recent, reach, knowledge] = await Promise.all([
+    overviewStats(CONSOLE_OVERVIEW_DAYS),
+    escalationsQueue(false),
+    dailyActivity(CONSOLE_OVERVIEW_DAYS),
+    recentConversations(6),
+    coverage(),
+    knowledgeCounts(),
+  ]);
   const share = stats.finished ? Math.round((stats.resolvedWithoutHuman / stats.finished) * 100) : null;
   const t = CONSOLE.today;
   const setup = [
@@ -75,11 +100,10 @@ export default async function Today() {
     { key: "voice", done: Boolean(process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY && process.env.NEXT_PUBLIC_VAPI_ASSISTANT_ID), copy: t.setup.voice, href: null },
     { key: "knowledge", done: knowledge.document > 0, copy: t.setup.knowledge, href: null },
   ];
-  const pair = (a: number | null, b: number | null) => (a === null ? t.none : t.speed.pair(ms(a), ms(b)));
 
   return (
     <>
-      <PageHeader eyebrow={CONSOLE.greeting(lagosDayPart())} title={t.heading} intro={t.intro} />
+      <PageHeader eyebrow={CONSOLE.greeting(lagosDayPart())} title={t.heading} intro={t.intro(CONSOLE_OVERVIEW_DAYS)} />
 
       {setup.some((item) => !item.done) && (
         <section className={styles.setup} aria-labelledby="setup-heading">
@@ -121,6 +145,7 @@ export default async function Today() {
           </div>
           <p className={styles.statValue}>{stats.conversations}</p>
           <p className={styles.statNote}>{t.cards.byChannel(stats.voice, stats.typed)}</p>
+          <p className={styles.statFoot}>{t.cards.today(stats.today)}</p>
         </div>
         <div className={styles.stat}>
           <div className={styles.statTop}>
@@ -148,21 +173,29 @@ export default async function Today() {
           </div>
           <p className={styles.statValue}>{stats.openEscalations}</p>
           <p className={styles.statNote}>{t.cards.booked(stats.callsBooked)}</p>
+          {stats.nextCallback && <p className={styles.statFoot}>{t.cards.next(whenWithZone(stats.nextCallback.at, stats.nextCallback.timezone))}</p>}
         </div>
         <div className={styles.stat}>
           <div className={styles.statTop}>
             <p className={styles.statLabel}>{t.cards.alerts}</p>
-            <span className={styles.statIcon} data-tone={stats.criticalToday ? "bad" : "accent"}>
+            <span className={styles.statIcon} data-tone={stats.critical ? "bad" : "accent"}>
               <BellIcon size={18} />
             </span>
           </div>
-          <p className={styles.statValue}>{stats.alertsToday}</p>
-          <p className={styles.statNote}>{t.cards.critical(stats.criticalToday)}</p>
+          <p className={styles.statValue}>{stats.alerts}</p>
+          <p className={styles.statNote}>{t.cards.critical(stats.critical)}</p>
         </div>
       </div>
 
-      <Card title={t.activity.heading} intro={t.activity.intro}>
-        <ActivityChart days={days} />
+      <Card title={t.activity.heading(CONSOLE_OVERVIEW_DAYS)} intro={t.activity.intro}>
+        {days.every((day) => SEGMENTS.every((key) => day[key] === 0)) ? (
+          <Empty icon={<ChatIcon size={20} />}>{t.activity.empty(CONSOLE_OVERVIEW_DAYS)}</Empty>
+        ) : (
+          <div className={styles.activity}>
+            <ActivityChart days={days} />
+            <Outcomes days={days} />
+          </div>
+        )}
       </Card>
 
       <div className={styles.twoColumn}>
@@ -191,7 +224,7 @@ export default async function Today() {
                       <p className={styles.listSub}>
                         <StatusText tone={statusTone(row.status)}>{CONSOLE.escalations.statuses[row.status] ?? row.status}</StatusText>
                         <span>
-                          <CalendarLine when={row.appointment_time ? whenWithZone(row.appointment_time, row.timezone) : null} /> {words(row.category)}
+                          <CalendarLine when={row.appointment_time ? whenWithZone(row.appointment_time, row.timezone) : null} /> {categoryLabel(row.category)}
                         </span>
                       </p>
                     </div>
@@ -242,16 +275,17 @@ export default async function Today() {
       <Card title={t.speed.heading}>
         <div className={styles.stats}>
           {[
-            { label: t.speed.firstText, value: pair(stats.firstTextP50, stats.firstTextP95), empty: stats.firstTextP50 === null },
-            { label: t.speed.vapiTurn, value: pair(stats.vapiTurnP50, stats.vapiTurnP95), empty: stats.vapiTurnP50 === null },
-            { label: t.speed.agentSpend, value: usd(stats.agentSpendEstimateUsd, 2), empty: false },
-            { label: t.speed.vapiCost, value: usd(stats.vapiCostUsd, 2), empty: false },
+            { label: t.speed.firstText, value: stats.firstTextP50 === null ? t.none : ms(stats.firstTextP50), note: stats.firstTextP95 === null ? null : t.speed.slowest(ms(stats.firstTextP95)), empty: stats.firstTextP50 === null },
+            { label: t.speed.vapiTurn, value: stats.vapiTurnP50 === null ? t.none : ms(stats.vapiTurnP50), note: stats.vapiTurnP95 === null ? null : t.speed.slowest(ms(stats.vapiTurnP95)), empty: stats.vapiTurnP50 === null },
+            { label: t.speed.agentSpend, value: usd(stats.agentSpendEstimateUsd, 2), note: t.speed.estimate, empty: false },
+            { label: t.speed.vapiCost, value: usd(stats.vapiCostUsd, 2), note: t.speed.billed, empty: false },
           ].map((item) => (
             <div key={item.label}>
               <p className={styles.statLabel}>{item.label}</p>
-              <p className={styles.statValue} data-empty={item.empty ? "true" : "false"} style={{ fontSize: item.empty ? undefined : "1.375rem" }}>
+              <p className={styles.statValue} data-empty={item.empty ? "true" : "false"} data-size="small">
                 {item.value}
               </p>
+              {item.note && <p className={styles.statNote}>{item.note}</p>}
             </div>
           ))}
         </div>
