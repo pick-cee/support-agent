@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { companyKey, findReferences, firstNameKey, normaliseEmail, normaliseReference } from "./normalise";
+import { companyKey, findReferences, firstNameKey, isDeliverableEmail, normaliseEmail, normaliseReference } from "./normalise";
 
 describe("normaliseEmail", () => {
   it.each([
@@ -96,5 +96,15 @@ describe("normaliseReference", () => {
 
   it.each([["my payment"], ["TXN"], ["the one from last week"]])("finds no reference in %j", (raw) => {
     expect(normaliseReference(raw, "TXN")).toEqual({ ok: false, reason: "no_digits" });
+  });
+});
+
+describe("isDeliverableEmail", () => {
+  it.each(["amara@lagosledger.example", "a@b.test", "x@foo.invalid", "me@localhost", "info@example.com", "info@example.org"])("treats %s as unable to receive mail", (email) => {
+    expect(isDeliverableEmail(email)).toBe(false);
+  });
+
+  it.each(["akin@gmail.com", "amara@lagosledger.com", "ops@example-company.com", "team@examples.com"])("treats %s as deliverable", (email) => {
+    expect(isDeliverableEmail(email)).toBe(true);
   });
 });

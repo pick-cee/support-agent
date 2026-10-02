@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RelayPay Support Agent</title>
+<style>
+  @page { size: A4; margin: 1.6cm 1.8cm 1.4cm 1.8cm; }
+  body { font-family: "Inter", "Segoe UI", Arial, sans-serif; font-size: 9.5pt; line-height: 1.32; color: #152033; }
+  h1 { font-size: 20pt; font-weight: 600; color: #0f347b; margin: 0 0 3pt 0; }
+  p.tagline { font-size: 10.5pt; color: #4d596b; margin: 0 0 6pt 0; }
+  p.meta { font-size: 8pt; color: #5d6a7d; margin: 0 0 8pt 0; padding-bottom: 6pt; border-bottom: 1px solid #e2e7ee; }
+  p.meta b { color: #152033; font-weight: 600; }
+  p.meta a { color: #0f347b; text-decoration: none; }
+  h2 { font-size: 8.5pt; font-weight: 600; letter-spacing: 0.06em; color: #00708f; margin: 9pt 0 3pt 0; }
+  p { margin: 0 0 4pt 0; }
+  b { font-weight: 600; color: #0f347b; }
+  ol { margin: 0 0 4pt 0; padding-left: 16pt; }
+  li { margin: 0 0 2pt 0; }
+  p.closing { margin-top: 8pt; padding-top: 6pt; border-top: 1px solid #e2e7ee; color: #4d596b; }
+</style>
+</head>
+<body>
+<h1>RelayPay Support Agent</h1>
+<p class="tagline">A voice and chat support line that answers from approved knowledge, checks payments when it is safe, and hands a case to a person with a booked callback. It never guesses and never drops a case.</p>
+<p class="meta"><b>Owner</b> Akinloluwa &nbsp;&nbsp; <b>Updated</b> 1 October 2026 &nbsp;&nbsp; <b>App</b> <a href="https://support-agent-gamma-two.vercel.app/">support-agent-gamma-two.vercel.app</a> &nbsp;&nbsp; <b>Repo</b> <a href="https://github.com/pick-cee/support-agent">github.com/pick-cee/support-agent</a></p>
+
+<h2>PURPOSE AND SUCCESS CRITERIA</h2>
+<p>RelayPay's customers are businesses moving money across African corridors. When a payment is late they want an answer now, and a support team cannot pick up every call. A first line that guesses is worse than none: a wrong arrival date or another customer's email read aloud costs more trust than a wait.</p>
+<p>It works if a customer, by voice or by typing, leaves one conversation with an approved answer, a status read from the record, a ticket, or a booked callback, and every step is in Supabase for the team. A reply the system cannot stand behind is a failure even if it sounds right.</p>
+
+<h2>HOW IT WORKS</h2>
+<p><b>One agent, by voice or by typing.</b> Vapi handles speech. Each turn comes to our endpoint, where code runs cheap checks first (silence, a plain goodbye, the daily budget), then one Claude Sonnet 5.5 turn through the Claude Agent SDK. Typing runs the same turn.</p>
+<p><b>Eight tools behind one MCP server.</b> Knowledge search, customer, transaction and payout lookups, callback times, tickets, escalation and event logging. Nothing about a record before the caller gives two details that agree, then only their own: one account per call, three attempts. No tool returns contact details.</p>
+<p><b>Checked before anything is spoken.</b> Code checks the reply against the turn's tool log: no number, reference, date or email the records lack, no promise, no invented review. Code, not the model, writes references, booked times and passed dates. A failing reply is repaired once or replaced with a safe line.</p>
+<p><b>A person, with the details ready.</b> An escalation books a Cal.com slot and emails the team a handoff with the caller's words and what was looked up; a ticket emails the customer their reference. Nobody hears "booked" unless Cal.com returned a booking.</p>
+
+<h2>HOW TO USE IT</h2>
+<ol>
+<li><b>Call or type.</b> Press the microphone on the page, or type. Say references such as TXN-9001 out loud.</li>
+<li><b>Ask, check, or ask for a person.</b> A reference is checked once two details match, and only if it is yours. Misheard? Tap Edit and type it. Anything a person should handle gets a ticket or a callback.</li>
+<li><b>Work the console.</b> Overview shows the week, Escalations who to call, when and why, and Conversations every reply with what was checked first.</li>
+<li><b>Teach it.</b> Knowledge lists what it could not answer. Write the answer once, or post a service notice, and it is used from the next question.</li>
+</ol>
+
+<h2>ASSUMPTIONS AND LIMITS</h2>
+<p>Identity is two matching facts, not authentication; production would send a one-time code. English only. The seed data is static and dated. A fresh agent process starts every turn: replies averaged 4.6 to 6.3 seconds on live calls (Vapi's measurement), and the booking turn can pass the 14 second limit, when the caller hears what was already done. No phone number: Vapi's free numbers are US only. AI cost is an estimate, never added to Vapi's bill.</p>
+
+<h2>TROUBLESHOOTING</h2>
+<p><b>"I couldn't find that reference."</b> Say it again slowly, letters first. It asks rather than guesses.</p>
+<p><b>It offers a specialist instead of answering.</b> The question is outside approved knowledge or needs a person: the safe path, not a fault.</p>
+<p><b>No callback was booked.</b> The case is in Escalations and the email says why. Email the customer to arrange a time.</p>
+<p><b>Microphone blocked.</b> Allow it in the address bar and press Try again, or type.</p>
+<p><b>An alert email arrived.</b> Alerts says what happened and what it means for customers; the technical detail is under "For your developer".</p>
+
+<p class="closing">Every tool call is logged by the MCP server, refusals and failures included, and every sentence is checked against the records before it is spoken, so a call can be checked rather than trusted.</p>
+</body>
+</html>

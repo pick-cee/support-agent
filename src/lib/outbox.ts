@@ -6,7 +6,9 @@ import { JOB_BACKOFF_MINUTES, JOB_MAX_ATTEMPTS, OUTBOX_BATCH_SIZE } from "@/lib/
 import { queryDb } from "@/lib/db";
 import { appBaseUrl, optionalEnv } from "@/lib/env";
 import { buildAlertEmail } from "@/lib/email/notices";
+import { buildTicketConfirmationEmail } from "@/lib/email/ticket-confirmation";
 import { buildHandoffEmail } from "@/lib/handoff-email";
+import { isDeliverableEmail } from "@/lib/normalise";
 import { recipientsFor } from "@/lib/notifications";
 import { sendEmail } from "@/lib/resend";
 
@@ -19,12 +21,12 @@ export type SideEffectsMode = "live" | "sandbox";
 
 type Job = {
   id: string;
-  kind: "book_callback" | "notify_escalation" | "notify_alert";
+  kind: "book_callback" | "notify_escalation" | "notify_alert" | "notify_ticket";
   ref_id: string;
   payload: Record<string, unknown>;
   attempts: number;
   last_error: string | null;
-  /** The escalation belongs to an eval conversation: never booked or emailed, whoever runs the job. */
+  /** The escalation or ticket belongs to an eval conversation: never booked or emailed, whoever runs the job. */
   for_eval: boolean;
 };
 
@@ -174,6 +176,24 @@ async function notifyEscalation(job: Job, mode: SideEffectsMode): Promise<void> 
   await queryDb(`update support_agent.escalations set notification_status = 'sent', notification_error = null, updated_at = now() where id = $1`, [escalation.id]);
 }
 
+/** The customer's confirmation when a ticket opens (DESIGN §10.5), to the address they read back or the one on file. */
+async function notifyTicket(job: Job, mode: SideEffectsMode): Promise<void> {
+  const ticket = (
+    await queryDb<{ id: string; ticket_ref: string; contact_email: string | null; confirmation_status: string; created_at: string }>(
+      `select id, ticket_ref, contact_email, confirmation_status, created_at::text from support_agent.support_tickets where id = $1`,
+      [job.ref_id],
+    )
+  ).rows[0];
+  if (!ticket) throw new FinalError(`ticket ${job.ref_id} not found`);
+  if (ticket.confirmation_status === "sent") return;
+  const set = (status: string, error: string | null = null) =>
+    queryDb(`update support_agent.support_tickets set confirmation_status = $2, confirmation_error = $3, updated_at = now() where id = $1`, [ticket.id, status, error]);
+  if (mode === "sandbox") return void (await set("skipped_eval"));
+  if (!ticket.contact_email || !isDeliverableEmail(ticket.contact_email)) return void (await set("skipped_undeliverable", "the address cannot receive email"));
+  await sendEmail({ to: [ticket.contact_email], ...buildTicketConfirmationEmail(ticket), idempotencyKey: `ticket:${ticket.id}` });
+  await set("sent");
+}
+
 async function notifyAlert(job: Job): Promise<void> {
   const alert = (
     await queryDb<{ id: string; type: string; severity: string; message: string; context: Record<string, unknown>; occurrences: number; first_seen: string; last_seen: string }>(
@@ -211,6 +231,7 @@ async function finish(job: Job, error: unknown): Promise<void> {
   await queryDb(`update support_agent.jobs set status = 'dead', last_error = $2, updated_at = now() where id = $1`, [job.id, message]);
   if (job.kind === "book_callback") await setBooking(job.ref_id, { status: "failed", error: "the booking calendar did not answer" });
   if (job.kind === "notify_escalation") await queryDb(`update support_agent.escalations set notification_status = 'failed', updated_at = now() where id = $1`, [job.ref_id]);
+  if (job.kind === "notify_ticket") await queryDb(`update support_agent.support_tickets set confirmation_status = 'failed', confirmation_error = $2, updated_at = now() where id = $1`, [job.ref_id, message]);
   if (job.kind !== "notify_alert") {
     await raiseAlert({ type: "job_dead", severity: "critical", fingerprint: `job_dead:${job.kind}`, message: `A ${job.kind} job gave up after ${job.attempts} attempts.`, context: { job_id: job.id, ref_id: job.ref_id, error: message } });
   } else {
@@ -227,6 +248,7 @@ async function runOne(job: Job, requested: SideEffectsMode): Promise<void> {
   try {
     if (job.kind === "book_callback") await bookCallback(job, mode);
     else if (job.kind === "notify_escalation") await notifyEscalation(job, mode);
+    else if (job.kind === "notify_ticket") await notifyTicket(job, mode);
     else await notifyAlert(job);
   } catch (caught) {
     error = caught;
@@ -235,8 +257,10 @@ async function runOne(job: Job, requested: SideEffectsMode): Promise<void> {
 }
 
 const CLAIM_COLUMNS = `id, kind, ref_id, payload, attempts, last_error,
-  exists (select 1 from support_agent.escalations e join support_agent.conversations c on c.id = e.conversation_id
-           where e.id::text = jobs.ref_id::text and c.channel = 'eval') as for_eval`;
+  (exists (select 1 from support_agent.escalations e join support_agent.conversations c on c.id = e.conversation_id
+            where e.id::text = jobs.ref_id::text and c.channel = 'eval')
+   or exists (select 1 from support_agent.support_tickets t join support_agent.conversations c on c.id = t.conversation_id
+            where t.id::text = jobs.ref_id::text and c.channel = 'eval')) as for_eval`;
 
 /** Runs these jobs now, once each, if they are still pending. Used inline by create_escalation and raiseAlert. */
 export async function runJobsNow(ids: string[], mode: SideEffectsMode): Promise<void> {

@@ -318,6 +318,15 @@ export function UserIcon(props: IconProps) {
   );
 }
 
+export function EditIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z" />
+      <path d="M13.5 8.5l3 3" />
+    </Svg>
+  );
+}
+
 export function ArrowUpIcon(props: IconProps) {
   return (
     <Svg {...props}>

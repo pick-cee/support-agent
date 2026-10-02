@@ -77,13 +77,15 @@ async function load(conversationId: string): Promise<EvalRecord> {
       [conversationId],
     ),
     queryDb<EvalRecord["conversation"]>(`select verified_customer_id, escalation_id from support_agent.conversations where id = $1`, [conversationId]),
-    queryDb<EvalRecord["tickets"][number]>(`select ticket_ref, category, priority, transaction_id, reported_reference from support_agent.support_tickets where conversation_id = $1 order by created_at`, [conversationId]),
+    queryDb<EvalRecord["tickets"][number]>(`select ticket_ref, category, priority, transaction_id, reported_reference, contact_email, confirmation_status from support_agent.support_tickets where conversation_id = $1 order by created_at`, [conversationId]),
     queryDb<EvalRecord["escalations"][number]>(
       `select escalation_ref, user_name, user_email, category, booking_status, notification_status, call_booked from support_agent.escalations where conversation_id = $1 order by created_at`,
       [conversationId],
     ),
     queryDb<EvalRecord["jobs"][number]>(
-      `select j.kind, j.status from support_agent.jobs j join support_agent.escalations e on e.id = j.ref_id where e.conversation_id = $1`,
+      `select j.kind, j.status from support_agent.jobs j join support_agent.escalations e on e.id = j.ref_id where e.conversation_id = $1
+       union all
+       select j.kind, j.status from support_agent.jobs j join support_agent.support_tickets t on t.id = j.ref_id where t.conversation_id = $1`,
       [conversationId],
     ),
     queryDb<EvalRecord["retrievals"][number]>(`select query, found, chunk_ids_returned, chunk_ids_used from support_agent.retrieval_logs where conversation_id = $1 order by created_at`, [conversationId]),

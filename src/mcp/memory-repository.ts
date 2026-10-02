@@ -29,7 +29,7 @@ import type {
 // says so (degraded: true).
 
 type Ticket = TicketRecord & TicketInput;
-type Job = { id: string; kind: "book_callback" | "notify_escalation"; ref_id: string; status: "pending" | "done" };
+type Job = { id: string; kind: "book_callback" | "notify_escalation" | "notify_ticket"; ref_id: string; status: "pending" | "done" };
 
 export type MemoryRepository = Repository & {
   readonly tickets: Ticket[];
@@ -99,7 +99,7 @@ export function createMemoryRepository(root: string = process.cwd()): MemoryRepo
     ]),
   );
   const kb = chunkKnowledgeBase(readFileSync(path.join(root, KB_SOURCE_PATH), "utf8"));
-  const conversations = new Map<string, { verifiedCustomerId: string | null; escalationId: string | null }>();
+  const conversations = new Map<string, { verifiedCustomerId: string | null; escalationId: string | null; verificationFailures: number }>();
   const tickets: Ticket[] = [];
   const escalations: EscalationRecord[] = [];
   const jobs: Job[] = [];
@@ -109,12 +109,19 @@ export function createMemoryRepository(root: string = process.cwd()): MemoryRepo
   let ticketSeq = 4001;
   let escalationSeq = 2001;
 
-  const insertTicket = (input: TicketInput): { ticket: Ticket; created: boolean } => {
+  const insertTicket = (input: TicketInput): { ticket: Ticket; created: boolean; jobIds: string[] } => {
     const existing = tickets.find((ticket) => ticket.idempotencyKey === input.idempotencyKey);
-    if (existing) return { ticket: existing, created: false };
-    const ticket: Ticket = { ...input, id: randomUUID(), ticket_ref: `T-${ticketSeq++}`, status: "open", created_at: new Date().toISOString() };
+    if (existing) return { ticket: existing, created: false, jobIds: [] };
+    const confirmation = input.confirmation ?? "not_requested";
+    const ticket: Ticket = { ...input, id: randomUUID(), ticket_ref: `T-${ticketSeq++}`, status: "open", created_at: new Date().toISOString(), confirmation_status: confirmation };
     tickets.push(ticket);
-    return { ticket, created: true };
+    const jobIds: string[] = [];
+    if (confirmation === "pending") {
+      const job: Job = { id: randomUUID(), kind: "notify_ticket", ref_id: ticket.id, status: "pending" };
+      jobs.push(job);
+      jobIds.push(job.id);
+    }
+    return { ticket, created: true, jobIds };
   };
 
   return {
@@ -129,16 +136,22 @@ export function createMemoryRepository(root: string = process.cwd()): MemoryRepo
 
     async conversationState(id) {
       const conversation = conversations.get(id);
-      return conversation ? { id, verifiedCustomerId: conversation.verifiedCustomerId, escalated: conversation.escalationId !== null } : null;
+      return conversation ? { id, verifiedCustomerId: conversation.verifiedCustomerId, escalated: conversation.escalationId !== null, verificationFailures: conversation.verificationFailures } : null;
     },
     async createConversation() {
       const id = randomUUID();
-      conversations.set(id, { verifiedCustomerId: null, escalationId: null });
+      conversations.set(id, { verifiedCustomerId: null, escalationId: null, verificationFailures: 0 });
       return id;
     },
     async setVerifiedCustomer(id, customerId) {
       const conversation = conversations.get(id);
       if (conversation) conversation.verifiedCustomerId = customerId;
+    },
+    async recordVerificationFailure(id) {
+      const conversation = conversations.get(id);
+      if (!conversation) return 0;
+      conversation.verificationFailures += 1;
+      return conversation.verificationFailures;
     },
     async findCustomerCandidates(ids) {
       return [...customers.values()].filter(
@@ -232,6 +245,8 @@ export function memoryServices(repository: MemoryRepository): ToolServices {
         const escalation = repository.escalations.find((candidate) => candidate.id === job.ref_id);
         if (escalation && job.kind === "book_callback") escalation.booking_status = "skipped_eval";
         if (escalation && job.kind === "notify_escalation") escalation.notification_status = "skipped_eval";
+        const ticket = repository.tickets.find((candidate) => candidate.id === job.ref_id);
+        if (ticket && job.kind === "notify_ticket") ticket.confirmation_status = "skipped_eval";
         job.status = "done";
       }
     },

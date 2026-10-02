@@ -2,9 +2,11 @@ import * as z from "zod";
 
 import { companyKey, firstNameKey, normaliseEmail, normaliseReference } from "@/lib/normalise";
 
+import { VERIFY_MAX_FAILURES } from "@/lib/constants";
+
 import { lenientInput } from "../lenient-input";
 import type { CustomerRecord, ToolDefinition, ToolOutcome } from "../types";
-import { COMPLIANCE_TERMS, invalid, refused, refusedAfterEscalation } from "./shared";
+import { COMPLIANCE_TERMS, invalid, refused, refusedAfterEscalation, refusedLocked, verificationLocked } from "./shared";
 
 type Input = { customer_id?: string; email?: string; company_name?: string; contact_name?: string };
 
@@ -42,6 +44,15 @@ const NOT_VERIFIED: ToolOutcome = refused(
   "refused: identifiers did not verify",
 );
 
+// One identity per conversation (DESIGN §7.2): a caller verified as Amara cannot
+// become Daniel by naming his company. The same reply whether the new details
+// are real or not, so a verified caller cannot test someone else's either.
+const ALREADY_VERIFIED: ToolOutcome = refused(
+  "already_verified",
+  "This conversation is already verified for one account, and only that account can be discussed. Say you have already confirmed who you are speaking with, and that another account's holder needs to contact RelayPay themselves. Do not say whether the other details match anything.",
+  "refused: conversation already verified for another account",
+);
+
 function routing(record: CustomerRecord): "normal" | "escalate_account_questions" | "verification_incomplete" {
   if (record.account_status === "restricted" || record.kyc_status === "review required") return "escalate_account_questions";
   if (record.account_status === "pending verification" || record.kyc_status === "pending") return "verification_incomplete";
@@ -63,9 +74,10 @@ export const lookupCustomer: ToolDefinition<Input> = {
   name: "lookup_customer",
   title: "Verify and look up a customer",
   description:
-    "Verify the caller's account when they ask about it. Needs at least two identifiers that agree on the same record: company name, the contact's first name, the account email or the customer id. " +
-    "One identifier is not enough; the tool says which to ask for. On success the caller is verified for the rest of the call, and speakable_summary is what you may say. " +
-    "Never say anything listed in do_not_speak. routing escalate_account_questions means account questions go to a specialist.",
+    "Verify the caller before anything about their account, a transaction or a payout. Needs at least two identifiers that agree on the same record: company name, the contact's first name, the account email or the customer id. " +
+    "One identifier is not enough; the tool says which to ask for. On success the caller is verified for the rest of the call, for that one account only, and speakable_summary is what you may say. " +
+    `After ${VERIFY_MAX_FAILURES} failed attempts in a call, verification closes. ` +
+    "Never say anything listed in do_not_speak. routing escalate_account_questions means questions about the account itself go to a specialist; a transaction or payout reference the caller gave may still be looked up.",
   wireInput: lenientInput({
     customer_id: { type: "string", description: "A customer id the caller gave, for example CUS-1001. Rarely known by callers." },
     email: { type: "string", description: "The account email the caller gave, as they said it." },
@@ -91,6 +103,7 @@ export const lookupCustomer: ToolDefinition<Input> = {
 
   async run({ input, context, state, repository }) {
     if (state?.escalated) return refusedAfterEscalation("customer lookup");
+    if (verificationLocked(state)) return refusedLocked("customer lookup");
 
     const customer = normaliseReference(input.customer_id, "CUS");
     const ids: Identifiers = {
@@ -101,6 +114,15 @@ export const lookupCustomer: ToolDefinition<Input> = {
     };
     const supplied = (Object.keys(ids) as (keyof Identifiers)[]).filter((key) => ids[key] !== null);
     if (input.email && !ids.email) return invalid("The email did not read as an email address. Ask the caller to spell it.", "invalid_input: email did not validate");
+
+    // Already verified: details that agree with that account confirm it again;
+    // anything else is another account, refused before it is even checked.
+    if (state?.verifiedCustomerId) {
+      const current = await repository.findCustomer(state.verifiedCustomerId);
+      const same = current ? compare(current, ids) : null;
+      if (!current || !same || same.contradicted.length > 0 || same.matched.length === 0) return ALREADY_VERIFIED;
+      return verifiedOutcome(current, same.matched);
+    }
 
     if (supplied.length < 2) {
       const askFor = (["companyKey", "firstName", "email"] as const).filter((key) => ids[key] === null).map((key) => IDENTIFIER_NAMES[key]);
@@ -116,27 +138,35 @@ export const lookupCustomer: ToolDefinition<Input> = {
     const verified = candidates
       .map((record) => ({ record, ...compare(record, ids) }))
       .filter((candidate) => candidate.matched.length >= 2 && candidate.contradicted.length === 0);
-    if (verified.length !== 1) return NOT_VERIFIED;
+    if (verified.length !== 1) {
+      // Counted on the conversation, so guessing ends at VERIFY_MAX_FAILURES.
+      const failures = context.conversationId ? await repository.recordVerificationFailure(context.conversationId) : 0;
+      return failures >= VERIFY_MAX_FAILURES ? refusedLocked("customer lookup") : NOT_VERIFIED;
+    }
 
-    const record = verified[0]!.record;
+    const { record, matched } = verified[0]!;
     if (context.conversationId) await repository.setVerifiedCustomer(context.conversationId, record.customer_id);
-    const route = routing(record);
-    const payload = {
-      found: true,
-      verified: true,
-      customer_id: record.customer_id,
-      company_name: record.company_name,
-      plan: record.plan,
-      account_status: record.account_status,
-      kyc_status: record.kyc_status,
-      support_notes: record.support_notes,
-      speakable_summary: speakableSummary(record),
-      routing: route,
-      region: record.region,
-      // Returned because the spec requires them and routing needs them; never said.
-      do_not_speak: ["customer_id", "kyc_status", "support_notes"],
-      sensitive_terms: route === "escalate_account_questions" ? COMPLIANCE_TERMS : [],
-    };
-    return { status: "ok", isError: false, payload, summary: `verified ${record.customer_id} with ${verified[0]!.matched.join(" and ")}: ${record.account_status}, routing ${route}` };
+    return verifiedOutcome(record, matched);
   },
 };
+
+function verifiedOutcome(record: CustomerRecord, matched: string[]): ToolOutcome {
+  const route = routing(record);
+  const payload = {
+    found: true,
+    verified: true,
+    customer_id: record.customer_id,
+    company_name: record.company_name,
+    plan: record.plan,
+    account_status: record.account_status,
+    kyc_status: record.kyc_status,
+    support_notes: record.support_notes,
+    speakable_summary: speakableSummary(record),
+    routing: route,
+    region: record.region,
+    // Returned because the spec requires them and routing needs them; never said.
+    do_not_speak: ["customer_id", "kyc_status", "support_notes"],
+    sensitive_terms: route === "escalate_account_questions" ? COMPLIANCE_TERMS : [],
+  };
+  return { status: "ok", isError: false, payload, summary: `verified ${record.customer_id} with ${matched.join(" and ")}: ${record.account_status}, routing ${route}` };
+}

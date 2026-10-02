@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { PAGE } from "../copy";
-import { CloseIcon, EndCallIcon, InfoIcon, MicIcon, MicOffIcon, PlusIcon } from "../icons";
+import { ArrowUpIcon, CloseIcon, EndCallIcon, InfoIcon, MicIcon, MicOffIcon, PlusIcon } from "../icons";
 import styles from "../page.module.css";
 import { CallView } from "./call-view";
 import { Composer, type ComposerHandle } from "./composer";
@@ -25,6 +25,22 @@ export function SupportApp({ publicKey, assistantId }: { publicKey: string; assi
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [voiceNotice, setVoiceNotice] = useState(false);
   const wasPending = useRef(false);
+  // Typing into a live call: a fix for what speech recognition heard (DESIGN §13).
+  const [callDraft, setCallDraft] = useState("");
+  const callInputRef = useRef<HTMLInputElement>(null);
+
+  const editHeard = useCallback((text: string) => {
+    setCallDraft(text);
+    requestAnimationFrame(() => {
+      callInputRef.current?.focus();
+      callInputRef.current?.select();
+    });
+  }, []);
+
+  const sendTyped = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (call.sendText(callDraft)) setCallDraft("");
+  };
 
   // New words go to the bottom; the view follows them. The welcome screen is read from the top.
   useEffect(() => {
@@ -46,6 +62,7 @@ export function SupportApp({ publicKey, assistantId }: { publicKey: string; assi
       return;
     }
     setVoiceNotice(false);
+    setCallDraft("");
     void call.start();
   }, [call]);
 
@@ -86,7 +103,16 @@ export function SupportApp({ publicKey, assistantId }: { publicKey: string; assi
       <main ref={scrollerRef} className={styles.scroller}>
         <div className={styles.column}>
           {call.open ? (
-            <CallView phase={call.phase} lines={call.lines} summary={call.summary} startedAt={call.startedAt} busy={call.busy} muted={call.muted} orbRef={call.orbRef} />
+            <CallView
+              phase={call.phase}
+              lines={call.lines}
+              summary={call.summary}
+              startedAt={call.startedAt}
+              busy={call.busy}
+              muted={call.muted}
+              orbRef={call.orbRef}
+              onEdit={call.canType ? editHeard : null}
+            />
           ) : !chat.started ? (
             <Welcome onPick={(question) => void chat.send(question)} onCall={startCall} disabled={chat.pending} />
           ) : (
@@ -111,29 +137,52 @@ export function SupportApp({ publicKey, assistantId }: { publicKey: string; assi
       <div className={styles.dock}>
         <div className={styles.dockInner}>
           {call.open ? (
-            <div className={styles.callActions}>
-              {call.busy ? (
-                <>
-                  <button type="button" className={styles.secondaryButton} onClick={call.toggleMute} aria-pressed={call.muted} disabled={!call.live}>
-                    {call.muted ? <MicOffIcon size={18} /> : <MicIcon size={18} />}
-                    {call.muted ? PAGE.voice.unmute : PAGE.voice.mute}
+            <div className={styles.callDock}>
+              {call.canType && (
+                <form className={styles.callType} onSubmit={sendTyped}>
+                  <label htmlFor="call-type" className="visually-hidden">
+                    {PAGE.voice.typeLabel}
+                  </label>
+                  <input
+                    id="call-type"
+                    ref={callInputRef}
+                    className={styles.callTypeInput}
+                    value={callDraft}
+                    onChange={(event) => setCallDraft(event.target.value)}
+                    placeholder={PAGE.voice.typePlaceholder}
+                    autoComplete="off"
+                    enterKeyHint="send"
+                    maxLength={500}
+                  />
+                  <button type="submit" className={styles.sendButton} disabled={!callDraft.trim()} data-ready={callDraft.trim() ? "true" : "false"} aria-label={PAGE.voice.typeSend}>
+                    <ArrowUpIcon size={18} />
                   </button>
-                  <button type="button" className={styles.dangerButton} onClick={() => void call.stop()} disabled={call.phase === "ending" || call.phase === "askingMic"}>
-                    <EndCallIcon size={20} />
-                    {PAGE.voice.endCall}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button type="button" className={styles.secondaryButton} onClick={backToMessages}>
-                    {PAGE.voice.backToChat}
-                  </button>
-                  <button type="button" className={styles.primaryButton} onClick={startCall}>
-                    <MicIcon size={18} />
-                    {retryable ? PAGE.voice.retry : PAGE.voice.callAgain}
-                  </button>
-                </>
+                </form>
               )}
+              <div className={styles.callActions}>
+                {call.busy ? (
+                  <>
+                    <button type="button" className={styles.secondaryButton} onClick={call.toggleMute} aria-pressed={call.muted} disabled={!call.live}>
+                      {call.muted ? <MicOffIcon size={18} /> : <MicIcon size={18} />}
+                      {call.muted ? PAGE.voice.unmute : PAGE.voice.mute}
+                    </button>
+                    <button type="button" className={styles.dangerButton} onClick={() => void call.stop()} disabled={call.phase === "ending" || call.phase === "askingMic"}>
+                      <EndCallIcon size={20} />
+                      {PAGE.voice.endCall}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" className={styles.secondaryButton} onClick={backToMessages}>
+                      {PAGE.voice.backToChat}
+                    </button>
+                    <button type="button" className={styles.primaryButton} onClick={startCall}>
+                      <MicIcon size={18} />
+                      {retryable ? PAGE.voice.retry : PAGE.voice.callAgain}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           ) : chat.ended ? (
             <div className={styles.callActions}>

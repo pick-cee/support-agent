@@ -138,6 +138,16 @@ export function normaliseEmail(raw: unknown): string | null {
   return EMAIL_SHAPE.test(text) ? text : null;
 }
 
+/**
+ * False for the domains set aside never to receive mail (RFC 2606 and 6761):
+ * every seed customer's address is on .example. An email to one would bounce,
+ * so the system neither sends it nor tells the caller it will.
+ */
+export function isDeliverableEmail(email: string): boolean {
+  const domain = email.split("@")[1]?.toLowerCase() ?? "";
+  return Boolean(domain) && !/(^|\.)(example|test|invalid|localhost)$/.test(domain) && !/^example\.(com|net|org)$/.test(domain);
+}
+
 /** Case, spaces and punctuation are ignored: "Lagos Ledger" matches LagosLedger. Mirrors customers.company_key. */
 export function companyKey(raw: unknown): string | null {
   if (typeof raw !== "string") return null;

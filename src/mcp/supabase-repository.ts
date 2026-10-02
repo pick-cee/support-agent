@@ -27,7 +27,7 @@ import type {
 // midnight, and on a server east of UTC that prints as the day before.
 
 const CUSTOMER_COLUMNS = "customer_id, company_name, company_key, contact_name, contact_email, plan, account_status, region, kyc_status, support_notes";
-const TICKET_COLUMNS = "id, ticket_ref, status, priority, category, created_at::text";
+const TICKET_COLUMNS = "id, ticket_ref, status, priority, category, created_at::text, confirmation_status";
 const ESCALATION_SELECT = `
   select e.id, e.escalation_ref, e.ticket_id, t.ticket_ref, e.status, e.call_booked, e.appointment_time::text, e.booking_status,
          e.booking_error, e.notification_status, e.timezone, e.requested_start::text, e.user_name, e.user_email, e.category, e.reason,
@@ -56,12 +56,23 @@ export const supabaseRepository: Repository = {
   backend: "supabase",
 
   async conversationState(conversationId) {
-    const result = await queryDb<{ id: string; verified_customer_id: string | null; escalation_id: string | null }>(
-      "select id, verified_customer_id, escalation_id from support_agent.conversations where id = $1",
+    const result = await queryDb<{ id: string; verified_customer_id: string | null; escalation_id: string | null; verification_failures: number }>(
+      "select id, verified_customer_id, escalation_id, verification_failures from support_agent.conversations where id = $1",
       [conversationId],
     );
     const row = result.rows[0];
-    return row ? ({ id: row.id, verifiedCustomerId: row.verified_customer_id, escalated: row.escalation_id !== null } satisfies ConversationState) : null;
+    return row
+      ? ({ id: row.id, verifiedCustomerId: row.verified_customer_id, escalated: row.escalation_id !== null, verificationFailures: row.verification_failures } satisfies ConversationState)
+      : null;
+  },
+
+  async recordVerificationFailure(conversationId) {
+    // One statement, so two parallel tool calls cannot both read the old count.
+    const result = await queryDb<{ verification_failures: number }>(
+      `update support_agent.conversations set verification_failures = verification_failures + 1, updated_at = now() where id = $1 returning verification_failures`,
+      [conversationId],
+    );
+    return result.rows[0]?.verification_failures ?? 0;
   },
 
   async createConversation(channel) {
@@ -157,18 +168,46 @@ export const supabaseRepository: Repository = {
   },
 
   async createTicket(input: TicketInput) {
-    // Insert-or-return on the unique key: Vapi retries and interruptions double-fire tools.
-    const inserted = await queryDb<TicketRecord>(
-      `insert into support_agent.support_tickets
-         (conversation_id, customer_id, transaction_id, payout_id, reported_reference, category, priority, proposed_priority, summary, source, idempotency_key)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       on conflict (idempotency_key) do nothing
-       returning ${TICKET_COLUMNS}`,
-      [input.conversationId, input.customerId, input.transactionId, input.payoutId, input.reportedReference, input.category, input.priority, input.proposedPriority, input.summary, input.source, input.idempotencyKey],
-    );
-    if (inserted.rows[0]) return { ticket: inserted.rows[0], created: true };
-    const existing = await queryDb<TicketRecord>(`select ${TICKET_COLUMNS} from support_agent.support_tickets where idempotency_key = $1`, [input.idempotencyKey]);
-    return { ticket: existing.rows[0]!, created: false };
+    return withTransaction(async (client) => {
+      // Insert-or-return on the unique key: Vapi retries and interruptions double-fire tools.
+      const inserted = await client.query<TicketRecord>(
+        `insert into support_agent.support_tickets
+           (conversation_id, customer_id, transaction_id, payout_id, reported_reference, category, priority, proposed_priority, summary, source, idempotency_key, contact_email, confirmation_status)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         on conflict (idempotency_key) do nothing
+         returning ${TICKET_COLUMNS}`,
+        [
+          input.conversationId,
+          input.customerId,
+          input.transactionId,
+          input.payoutId,
+          input.reportedReference,
+          input.category,
+          input.priority,
+          input.proposedPriority,
+          input.summary,
+          input.source,
+          input.idempotencyKey,
+          input.contactEmail ?? null,
+          input.confirmation ?? "not_requested",
+        ],
+      );
+      const ticket = inserted.rows[0];
+      if (!ticket) {
+        const existing = await client.query<TicketRecord>(`select ${TICKET_COLUMNS} from support_agent.support_tickets where idempotency_key = $1`, [input.idempotencyKey]);
+        return { ticket: existing.rows[0]!, created: false, jobIds: [] };
+      }
+      // Reserve, then act: the confirmation is a job beside the ticket, sent by the outbox.
+      const jobIds: string[] = [];
+      if (ticket.confirmation_status === "pending") {
+        const job = await client.query<{ id: string }>(
+          `insert into support_agent.jobs (kind, ref_id, dedupe_key) values ('notify_ticket', $1, $2) on conflict (dedupe_key) do nothing returning id`,
+          [ticket.id, `notify_ticket:${ticket.id}`],
+        );
+        if (job.rows[0]) jobIds.push(job.rows[0].id);
+      }
+      return { ticket, created: true, jobIds };
+    });
   },
 
   async createEscalation(input: EscalationInput) {

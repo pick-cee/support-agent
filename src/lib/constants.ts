@@ -56,6 +56,8 @@ export const MAX_USER_CHARS = 1_500;
 /** About three short sentences. */
 export const SPOKEN_TEXT_MAX_CHARS = 450;
 export const MAX_CLARIFY_STREAK = 2;
+/** Failed identity checks in one conversation before the MCP server closes lookups for it (DESIGN §7.2). */
+export const VERIFY_MAX_FAILURES = 3;
 
 // --- Typed messages on the web page (DESIGN §13) --------------------------------------
 /**

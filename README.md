@@ -41,25 +41,29 @@ npm run mcp:inspect
 ```
 
 This starts the MCP server over stdio in memory mode and opens MCP Inspector in
-the browser. Press **Connect**, then **Tools**, then **List Tools**. Try:
+the browser. Press **Connect**, then **Tools**, then **List Tools**. Records are
+shared only with a verified caller, so verify first, in this order:
 
-| Tool | Try it with |
-| --- | --- |
-| `search_knowledge_base` | `query`: `international payment fees` |
-| `lookup_customer` | `contact_name`: `Amara Okafor`, `company_name`: `LagosLedger` |
-| `lookup_transaction` | `transaction_id`: `TXN-9001` |
-| `lookup_payout` | `payout_id`: `PAY-7002` |
-| `find_callback_slots` | `preferred_time_text`: `tomorrow at 2pm` |
-| `create_support_ticket` | `summary`: `Invoice payment failed`, `category`: `payment` |
-| `create_escalation` | `user_name`, `user_email`, `category`: `account`, `reason` |
-| `log_conversation_event` | `event_type` (from the list), `summary` |
+| Step | Tool | Try it with |
+| --- | --- | --- |
+| 1 | `lookup_transaction` | `transaction_id`: `TXN-9001`. Refused: `verify_first`, and nothing about it |
+| 2 | `lookup_customer` | `contact_name`: `Amara`, `company_name`: `LagosLedger` |
+| 3 | `lookup_transaction` | `TXN-9001` again: now the status, the amount, and the passed estimate worked out in code |
+| 4 | `lookup_transaction` | `TXN-9003`, someone else's: `not_on_your_account`, exactly as for `TXN-1234`, which does not exist |
+| 5 | `lookup_customer` | `contact_name`: `Daniel`, `company_name`: `NairobiOps`: refused, one account per session |
+| | `search_knowledge_base` | `query`: `international payment fees` |
+| | `find_callback_slots` | `preferred_time_text`: `tomorrow at 2pm` |
+| | `create_support_ticket` | `summary`: `Invoice payment failed`, `category`: `payment`, `contact_email`: an address of yours (nothing is sent in memory mode) |
+| | `create_escalation` | `user_name`, `user_email`, `category`: `account`, `reason` |
+| | `log_conversation_event` | `event_type` (from the list), `summary` |
 
-Without the browser, the same server from the command line:
+Without the browser, the same server from the command line (each command is a
+new, unverified session, so a lookup there shows the refusal):
 
 ```bash
 npx -y @modelcontextprotocol/inspector --cli npx tsx scripts/mcp-stdio-memory.ts --method tools/list
 npx -y @modelcontextprotocol/inspector --cli npx tsx scripts/mcp-stdio-memory.ts \
-  --method tools/call --tool-name lookup_transaction --tool-arg transaction_id=TXN-9001
+  --method tools/call --tool-name lookup_customer --tool-arg contact_name=Amara --tool-arg company_name=LagosLedger
 ```
 
 Memory mode uses keyword search instead of embeddings, and books no real
@@ -85,8 +89,10 @@ booking).
   empty object.
 - **Nothing returns contact details or lists customers**, and nothing the agent
   can reach writes to `customers`, `transactions` or `payouts`.
-- **Identity takes two matching identifiers** on the same record; a miss and a
-  partial match get the same answer.
+- **Verify before any lookup.** Identity takes two matching identifiers on the
+  same record; a miss and a partial match get the same answer. Nothing about a
+  transaction or payout comes back before that, and then only the caller's
+  own. One account per session, and three failed attempts close verification.
 - **After an escalation, lookups refuse** for that conversation, enforced in
   the server.
 - **Every call is logged by the server** (`tool_calls`), including refusals,

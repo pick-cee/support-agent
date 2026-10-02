@@ -5,7 +5,7 @@ import { dateInZone, daysBetween } from "@/lib/time";
 
 import { lenientInput } from "../lenient-input";
 import type { ToolDefinition } from "../types";
-import { COMPLIANCE_TERMS, invalid, mentionsCompliance, refused, refusedAfterEscalation } from "./shared";
+import { COMPLIANCE_TERMS, invalid, mentionsCompliance, notOnAccount, refusedAfterEscalation, verifyFirst } from "./shared";
 
 // Statuses where the money has not landed yet, so a date in the past is a
 // problem to raise, not a promise to repeat (DESIGN §2.6).
@@ -17,8 +17,8 @@ export const lookupTransaction: ToolDefinition<{ transaction_id: string | number
   name: "lookup_transaction",
   title: "Look up a transaction",
   description:
-    "Look up one transaction by its reference (for example TXN-9001) when the caller asks about a specific transaction. " +
-    "Returns its status, type, estimated arrival and a customer-safe summary. Amount, currency and customer are withheld unless the caller is the verified owner. " +
+    "Look up one of the verified caller's transactions by its reference (for example TXN-9001). Verify the caller with lookup_customer first: until then this refuses and reveals nothing. " +
+    "Returns its status, type, amount, estimated arrival and a customer-safe summary. A reference that is not on the caller's account comes back not_on_your_account, whether or not it exists. " +
     "eta_passed true means the estimated arrival date is in the past and the money has not landed; summary_outdated true means the summary predates that and must not be repeated. " +
     "requires_escalation true means a specialist must handle it: say it needs review by a specialist and offer that, without explaining why.",
   wireInput: lenientInput({
@@ -42,33 +42,15 @@ export const lookupTransaction: ToolDefinition<{ transaction_id: string | number
         : invalid(`transaction_id did not contain a reference. ${ASK_FOR_REFERENCE}`, "invalid_input: no reference in transaction_id");
     }
     if (state?.escalated) return refusedAfterEscalation(reference.id);
+    const unverified = verifyFirst(state, reference.id);
+    if (unverified) return unverified;
 
     const row = await repository.findTransaction(reference.id);
-    if (!row) {
-      return {
-        status: "not_found",
-        isError: false,
-        payload: {
-          found: false,
-          reason: "not_found",
-          normalised_id: reference.id,
-          message: `There is no transaction ${reference.id} on record. Read the reference back to the caller and ask them to check it.`,
-        },
-        summary: `not_found ${reference.id}`,
-      };
-    }
+    if (!row) return notOnAccount(reference.id, "missing");
+    if (state!.verifiedCustomerId !== row.customer_id) return notOnAccount(reference.id, "not_owned");
 
-    // A verified caller asking about someone else's reference learns nothing
-    // about whether it exists.
-    if (state?.verifiedCustomerId && state.verifiedCustomerId !== row.customer_id) {
-      return refused(
-        "not_on_your_account",
-        "That reference is not on the verified caller's account. Say you can't find it on their account. Do not say whether it exists.",
-        `refused ${reference.id}: not on the verified caller's account`,
-      );
-    }
-
-    const disclosed = state?.verifiedCustomerId === row.customer_id;
+    // Only the verified owner gets this far.
+    const disclosed = true;
     const today = dateInZone(context.clock());
     const etaKnown = row.estimated_arrival !== null;
     const etaPassed = etaKnown && UNFINISHED.has(row.status) && daysBetween(row.estimated_arrival!, today) > 0;

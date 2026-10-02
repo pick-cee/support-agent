@@ -21,6 +21,8 @@ export type ConversationState = {
   id: string;
   verifiedCustomerId: string | null;
   escalated: boolean;
+  /** Failed identity checks this conversation; at VERIFY_MAX_FAILURES lookups close (DESIGN §7.2). */
+  verificationFailures: number;
 };
 
 export type CustomerRecord = {
@@ -108,6 +110,10 @@ export type TicketInput = {
   summary: string;
   source: "agent" | "system" | "mcp_direct";
   idempotencyKey: string;
+  /** Where the customer's confirmation goes (DESIGN §10.5); none for a ticket an escalation opens. */
+  contactEmail?: string | null;
+  /** pending queues the confirmation; skipped_undeliverable records why none was sent. */
+  confirmation?: "not_requested" | "pending" | "skipped_undeliverable";
 };
 
 export type TicketRecord = {
@@ -117,6 +123,7 @@ export type TicketRecord = {
   priority: string;
   category: string;
   created_at: string;
+  confirmation_status: string;
 };
 
 export type EscalationInput = {
@@ -187,6 +194,8 @@ export interface Repository {
   conversationState(conversationId: string): Promise<ConversationState | null>;
   createConversation(channel: "mcp_direct" | "eval"): Promise<string>;
   setVerifiedCustomer(conversationId: string, customerId: string): Promise<void>;
+  /** Counts one failed identity check and returns the conversation's total. */
+  recordVerificationFailure(conversationId: string): Promise<number>;
 
   /** Every customer that matches at least one identifier; code decides which, if any, two identifiers agree on. */
   findCustomerCandidates(identifiers: { customerId: string | null; email: string | null; companyKey: string | null; firstName: string | null }): Promise<CustomerRecord[]>;
@@ -198,8 +207,8 @@ export interface Repository {
   searchKnowledge(query: string): Promise<KbSearchResult>;
   logRetrieval(entry: RetrievalLog): Promise<void>;
 
-  /** Idempotent on the key: a retry returns the existing ticket with created false. */
-  createTicket(input: TicketInput): Promise<{ ticket: TicketRecord; created: boolean }>;
+  /** Idempotent on the key: a retry returns the existing ticket with created false. A new ticket with a deliverable contact email also gets its confirmation job, in the same transaction. */
+  createTicket(input: TicketInput): Promise<{ ticket: TicketRecord; created: boolean; jobIds: string[] }>;
   /** One transaction: the ticket if none, the escalation, the conversation marked escalated, and the outbox jobs. */
   createEscalation(input: EscalationInput): Promise<{ escalation: EscalationRecord; created: boolean; jobIds: string[] }>;
   findEscalation(escalationId: string): Promise<EscalationRecord | null>;

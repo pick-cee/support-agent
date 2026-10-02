@@ -11,8 +11,8 @@ import type { Summary } from "./summary-card";
 
 export type Phase = "idle" | "askingMic" | "connecting" | "listening" | "speaking" | "ending" | "ended" | "micBlocked" | "connectFailed" | "dropped";
 
-/** One side of the call, as it builds up: the caller's words live, the assistant's as sent to its voice. */
-export type CallLine = { id: number; role: "customer" | "assistant"; text: string; live: boolean };
+/** One side of the call, as it builds up: the caller's words live, the assistant's as sent to its voice. typed: the caller typed it into the call. */
+export type CallLine = { id: number; role: "customer" | "assistant"; text: string; live: boolean; typed?: boolean };
 
 const LIVE: Phase[] = ["connecting", "listening", "speaking"];
 
@@ -143,7 +143,8 @@ export function useVoiceCall(publicKey: string, assistantId: string) {
         if (final) callerSoFar.current = text;
         setLines((current) => {
           const last = current.at(-1);
-          if (last?.role === "customer") return [...current.slice(0, -1), { ...last, text, live: !final }];
+          // A typed line stays as typed: new speech starts a line of its own.
+          if (last?.role === "customer" && !last.typed) return [...current.slice(0, -1), { ...last, text, live: !final }];
           return [...current, { id: nextLine.current++, role: "customer", text, live: !final }];
         });
         return;
@@ -152,11 +153,12 @@ export function useVoiceCall(publicKey: string, assistantId: string) {
       // the assistant's audio is lossy ("An AI assistant" for "I'm an AI assistant"), so it is not used.
       if (message.type !== "voice-input" || !message.input) return;
       const text = readable(message.input);
-      // The greeting is already on screen.
-      if (!text || text === readable(FIRST_MESSAGE)) return;
+      if (!text) return;
       // The assistant has the floor: the caller's turn is over.
       callerSoFar.current = "";
       setLines((current) => {
+        // The greeting is already on screen, exactly; Vapi may send it whole or in pieces.
+        if (current.every((line) => line.role === "assistant") && readable(FIRST_MESSAGE).includes(text)) return current;
         const settled = current.map((line) => (line.live ? { ...line, live: false } : line));
         const last = settled.at(-1);
         if (last?.role === "assistant") return [...settled.slice(0, -1), { ...last, text: `${last.text} ${text}` }];
@@ -213,6 +215,22 @@ export function useVoiceCall(publicKey: string, assistantId: string) {
     setSummary(null);
   }, []);
 
+  /**
+   * The caller's own words, typed into the live call (DESIGN §13): a correction
+   * of what speech recognition heard, or a reference or email easier typed than
+   * said. It joins the conversation as the caller's message, and the assistant
+   * answers it by voice. False when there is no live call to send it to.
+   */
+  const sendText = useCallback((raw: string): boolean => {
+    const vapi = vapiRef.current;
+    const text = raw.trim();
+    if (!vapi || !text || finishedRef.current) return false;
+    vapi.send({ type: "add-message", message: { role: "user", content: text }, triggerResponseEnabled: true });
+    callerSoFar.current = "";
+    setLines((current) => [...current.map((line) => (line.live ? { ...line, live: false } : line)), { id: nextLine.current++, role: "customer", text, live: false, typed: true }]);
+    return true;
+  }, []);
+
   const toggleMute = useCallback(() => {
     const vapi = vapiRef.current;
     if (!vapi) return;
@@ -228,6 +246,9 @@ export function useVoiceCall(publicKey: string, assistantId: string) {
     lines,
     muted,
     toggleMute,
+    sendText,
+    /** Connected and in conversation: typed words can join the call. */
+    canType: phase === "listening" || phase === "speaking",
     summary,
     startedAt,
     orbRef,

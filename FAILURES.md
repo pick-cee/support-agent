@@ -749,3 +749,34 @@ here, never from memory afterwards.
   the wrong reply. The production logs that would confirm it were not kept.
 - **Fix:** `lastAnswerType` reads only turns before the current one, at every
   caller (voice, typing, eval). Not yet seen on a live call.
+
+### 54. The agent read "verify before any lookup" too broadly
+
+- **When:** 2026-10-02, the first eval run after verify-first (DESIGN §7.2).
+- **Symptom:** two scenarios failed. For "My invoice payment failed", the
+  agent asked who the caller was before asking for the reference, though a
+  ticket needs no verification. For PAY-7002, once Efua was verified, it
+  went straight to a specialist without looking the payout up, because her
+  account is restricted (routing `escalate_account_questions`).
+- **Root cause:** the new prompt line, "verify the caller before anything
+  about their account, a transaction or a payout", with nothing saying what
+  does not need it; and an older line that sent every question from a
+  restricted account to a specialist.
+- **Fix:** the prompt says verification is only for reading records
+  (questions, tickets and escalations need none), and that a restricted
+  account still has a reference looked up and reported before the
+  specialist is offered. The tool's description says the same. Both
+  scenarios then passed, with two others rerun alongside.
+
+### 55. The escalation test assumed tomorrow was a weekday
+
+- **When:** 2026-10-02 (a Friday), the full eval run.
+- **Symptom:** no escalation was created. Asked for "tomorrow at 2pm", the
+  real Cal.com calendar had nothing on Saturday and the agent offered two
+  Monday times; the scripted caller answered "Yes, that works", and the agent
+  rightly asked which one. The Logging row failed with it.
+- **Root cause:** the caller script, not the agent: it was written for a
+  weekday run against a live calendar. The event type was also recreated on
+  2026-10-01 with the default weekday schedule.
+- **Fix:** the caller answers "Yes, the first time works", which reads
+  correctly whether one time or two are offered.

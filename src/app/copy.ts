@@ -5,7 +5,8 @@
 // Spoken
 // ---------------------------------------------------------------------------
 
-export const FIRST_MESSAGE = "Hi, this is RelayPay support. I'm an AI assistant. How can I help today?";
+export const FIRST_MESSAGE =
+  "Hi, this is RelayPay support. I'm an AI assistant. I can answer questions about payments, payouts and fees, check a transaction or payout once I've confirmed who you are, log a ticket for our support team, or book a callback with a specialist. What can I help you with?";
 
 /** Spoken at most once per turn while the agent works. It never claims anything. */
 export const FILLER_PHRASES = ["One moment while I check that.", "Just a moment while I check that."] as const;
@@ -29,6 +30,7 @@ export const SPOKEN = {
   staleEta: (arrival: string, statusPhrase: string) => `The record showed an estimated arrival of ${arrival}, which has passed, and it's still ${statusPhrase}.`,
   stalePayout: (scheduled: string, statusPhrase: string) => `The payout was scheduled for ${scheduled}, which has passed, and it's still ${statusPhrase}.`,
   ticketOpened: (reference: string) => `I've opened a ticket for this. Your reference is ${reference}.`,
+  ticketConfirmation: "Our support team has it, and a confirmation is on its way to your email.",
   callbackBooked: (when: string) => `A specialist will call you on ${when}. You'll get a confirmation email from our booking system.`,
   callbackByEmail: "A specialist will email you to arrange a time.",
   escalatedAlready: "Your case is with a specialist, who will cover this with you.",
@@ -48,7 +50,8 @@ export const SPOKEN = {
  * turn runner swaps each voice line for its text version.
  */
 export const TYPED = {
-  greeting: "Hi, I'm RelayPay's AI support assistant. Ask me about payments, payouts, invoices or your account.",
+  greeting:
+    "Hi, I'm RelayPay's AI support assistant. I can answer questions about payments, payouts and fees, check a transaction or payout once I've confirmed who you are, log a ticket for our support team, or book a callback with a specialist. What can I help you with?",
   didNotCatch: "Please type your question and I'll take a look.",
   fallbackCollect: "Sorry, could you type that once more for me?",
   tooManyTurns: "We've covered a lot in this conversation. To make sure nothing gets missed, please continue through the support options in your RelayPay dashboard.",
@@ -101,6 +104,12 @@ export const PAGE = {
     mute: "Mute",
     unmute: "Unmute",
     mutedStatus: "You're muted",
+    typeLabel: "Type to the assistant during the call",
+    typePlaceholder: "Heard wrong? Type it here",
+    typeSend: "Send to the call",
+    edit: "Edit",
+    editLabel: "Edit what was heard, then send it",
+    typed: "Typed",
     status: {
       idle: "Ready when you are.",
       askingMic: "Allow microphone access to start the call.",
@@ -214,6 +223,21 @@ export const EMAIL = {
     nothingTold: "Nothing recorded.",
     noLookups: "No lookups.",
     action: "Open the conversation",
+  },
+  /** To the customer, when a ticket opens (DESIGN §10.5). No category: "compliance" is never explained to a customer. */
+  ticketConfirmation: {
+    subject: (reference: string) => `We've logged your request (${reference})`,
+    preheader: (reference: string) => `Your RelayPay support reference is ${reference}. A person will look into it and get back to you.`,
+    badge: (reference: string) => `Ticket ${reference}`,
+    title: "We've logged your request",
+    intro: "Thanks for contacting RelayPay support. Your request is with our support team, and a person will look into it and get back to you at this address.",
+    referenceLabel: "Your reference",
+    referenceNote: "Mention it if you contact us again about this.",
+    logged: "Logged",
+    nextHeading: "What happens next",
+    next: ["A member of our support team will review your request and reply to this email.", "You don't need to do anything else for now."],
+    reason: "You're receiving this because you asked RelayPay support to send a confirmation to this address.",
+    signature: "RelayPay Support",
   },
   alert: {
     subject: (severity: string, title: string) => `[RelayPay ${severity === "critical" ? "alert" : "warning"}] ${title}`,

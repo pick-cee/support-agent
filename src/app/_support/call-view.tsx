@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 
 import { PAGE } from "../copy";
-import { InfoIcon, MicIcon } from "../icons";
+import { EditIcon, InfoIcon, MicIcon } from "../icons";
 import styles from "../page.module.css";
 import { SummaryCard, type Summary } from "./summary-card";
 import { Words } from "./thread";
@@ -20,6 +20,8 @@ type Props = {
   busy: boolean;
   muted: boolean;
   orbRef: React.RefObject<HTMLDivElement | null>;
+  /** Puts a line the caller said into the type box, to fix and send; null when nothing can be sent. */
+  onEdit: ((text: string) => void) | null;
 };
 
 function clock(ms: number): string {
@@ -41,7 +43,7 @@ function useNow(active: boolean): number {
 // A voice call takes over the conversation area while it lasts (DESIGN §13):
 // who is talking at the top, and the conversation building up below it, both
 // sides, as it happens. It stays on screen after the call.
-export function CallView({ phase, lines, summary, startedAt, busy, muted, orbRef }: Props) {
+export function CallView({ phase, lines, summary, startedAt, busy, muted, orbRef, onEdit }: Props) {
   const now = useNow(startedAt !== null);
   const endRef = useRef<HTMLDivElement>(null);
   const notice = phase === "micBlocked" ? PAGE.voice.micBlocked : phase === "connectFailed" ? PAGE.voice.connectFailed : phase === "dropped" ? PAGE.voice.dropped : null;
@@ -109,6 +111,18 @@ export function CallView({ phase, lines, summary, startedAt, busy, muted, orbRef
                   <Words text={line.text} reveal={false} />
                   {line.live && <span className={styles.liveCaret} aria-hidden="true" />}
                 </p>
+                {/* Speech recognition can mishear: the caller fixes the words and sends them into the call. */}
+                {(line.typed || (onEdit && !line.live)) && (
+                  <p className={styles.lineMeta}>
+                    {line.typed && <span>{PAGE.voice.typed}</span>}
+                    {onEdit && !line.live && (
+                      <button type="button" className={styles.lineEdit} onClick={() => onEdit(line.text)} aria-label={`${PAGE.voice.editLabel}: ${line.text}`}>
+                        <EditIcon size={13} />
+                        {PAGE.voice.edit}
+                      </button>
+                    )}
+                  </p>
+                )}
               </li>
             ),
           )}

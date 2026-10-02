@@ -25,7 +25,7 @@ export type EvalRecord = {
   }[];
   toolCalls: { tool_name: string; status: string; result_summary: string | null; turn_index: number | null }[];
   conversation: { verified_customer_id: string | null; escalation_id: string | null };
-  tickets: { ticket_ref: string; category: string; priority: string; transaction_id: string | null; reported_reference: string | null }[];
+  tickets: { ticket_ref: string; category: string; priority: string; transaction_id: string | null; reported_reference: string | null; contact_email: string | null; confirmation_status: string }[];
   escalations: { escalation_ref: string; user_name: string; user_email: string; category: string; booking_status: string; notification_status: string; call_booked: boolean }[];
   jobs: { kind: string; status: string }[];
   retrievals: { query: string; found: boolean; chunk_ids_returned: string[]; chunk_ids_used: string[] }[];
@@ -121,35 +121,60 @@ const core: Scenario[] = [
     testCase: "Transaction or payout lookup",
     kind: "core",
     phase4: true,
-    expected: "TXN-9001: status and the code-written passed-estimate sentence, no amount, no promise. PAY-7002: requires review, a specialist offered, no compliance explanation.",
-    turns: ["Can you check transaction TXN-9001?", "What is happening with payout PAY-7002?"],
+    expected: "TXN-9001: nothing about it until the caller is verified; then the status and the code-written passed-estimate sentence, no promise.",
+    turns: ["Can you check transaction TXN-9001?", "I'm Amara from LagosLedger."],
     checks: (r) => [
-      check(calls(r, "lookup_transaction", 0).some((c) => c.status === "ok" && /TXN-9001/.test(c.result_summary ?? "")), "lookup_transaction found TXN-9001"),
-      check(/processing/.test(spoken(r, 0)), "says TXN-9001 is processing"),
-      check(/estimated arrival of 19 august, which has passed/.test(spoken(r, 0)), "speaks the code-written passed-estimate sentence"),
-      check(!/2,?400|dollar|usd/.test(spoken(r, 0)), "no amount spoken to an unverified caller"),
-      check(!/will arrive|guarantee|by tomorrow/.test(spoken(r, 0)), "no promise of arrival"),
-      check(calls(r, "lookup_payout", 1).some((c) => c.status === "ok" && /PAY-7002/.test(c.result_summary ?? "")), "lookup_payout found PAY-7002"),
+      check(!calls(r, "lookup_transaction", 0).some((c) => c.status === "ok"), "no record read before the caller was verified"),
+      check(!/processing|19 august|outgoing/.test(spoken(r, 0)), "nothing about TXN-9001 said before verification"),
+      check(spoken(r, 0).includes("?"), "asks who is calling first"),
+      check(r.conversation.verified_customer_id === "CUS-1001", "Amara verified"),
+      check(calls(r, "lookup_transaction", 1).some((c) => c.status === "ok" && /TXN-9001/.test(c.result_summary ?? "")), "lookup_transaction found TXN-9001 once verified"),
+      check(/processing/.test(spoken(r, 1)), "says TXN-9001 is processing"),
+      check(/estimated arrival of 19 august, which has passed/.test(spoken(r, 1)), "speaks the code-written passed-estimate sentence"),
+      check(!/will arrive|guarantee|by tomorrow/.test(spoken(r, 1)), "no promise of arrival"),
+    ],
+  },
+  {
+    key: "payout_lookup",
+    testCase: "Payout lookup",
+    kind: "core",
+    expected: "PAY-7002: nothing about it until the caller is verified; then that it needs review, a specialist offered, no compliance explanation.",
+    turns: ["What is happening with payout PAY-7002?", "I'm Efua from AccraStack."],
+    checks: (r) => [
+      check(!calls(r, "lookup_payout", 0).some((c) => c.status === "ok"), "no record read before the caller was verified"),
+      check(!/review|kente|5,?300/.test(spoken(r, 0)), "nothing about PAY-7002 said before verification"),
+      check(r.conversation.verified_customer_id === "CUS-1003", "Efua verified"),
+      check(calls(r, "lookup_payout", 1).some((c) => c.status === "ok" && /PAY-7002/.test(c.result_summary ?? "")), "lookup_payout found PAY-7002 once verified"),
       check(/review/.test(spoken(r, 1)), "says PAY-7002 needs review"),
       check(/specialist/.test(spoken(r, 1)), "offers a specialist"),
-      check(!/complian/.test(spoken(r, 1)), "no compliance explanation"),
+      check(!/complian/.test(spoken(r)), "no compliance explanation"),
     ],
   },
   {
     key: "ticket",
     testCase: "Ticket creation",
     kind: "core",
-    expected: "Asks for the reference first. When the caller has none, opens a ticket through create_support_ticket; the ticket is in Supabase and the spoken reference matches it.",
-    turns: ["My invoice payment failed and I need someone to look at it.", "I don't have the reference, please just log it so someone can look at it."],
+    expected: "Asks for the reference first. When the caller has none, asks where to send a confirmation and reads the email back, then opens a ticket through create_support_ticket; the ticket is in Supabase with that email, the spoken reference matches it, and a confirmation email is queued.",
+    turns: [
+      "My invoice payment failed and I need someone to look at it.",
+      "I don't have the reference, please just log it so someone can look at it.",
+      "Send it to amara at lagosledger dot com.",
+      "Yes, that's right.",
+    ],
     checks: (r) => {
       const ticket = r.tickets[0];
       // toSpeech reads T-4001 as "T 4 0 0 1".
       const spokenRef = ticket ? `t ${ticket.ticket_ref.slice(2).split("").join(" ")}` : "(no ticket)";
       return [
         check(/reference/.test(spoken(r, 0)) && spoken(r, 0).includes("?"), "first asks for the reference"),
+        check(/email/.test(spoken(r, 1)) && spoken(r, 1).includes("?"), "asks where to send the confirmation"),
+        check(/amara at lagosledger dot com|amara@lagosledger\.com/.test(spoken(r)), "reads the email back"),
         check(calls(r, "create_support_ticket").some((c) => c.status === "ok"), "create_support_ticket succeeded"),
         check(r.tickets.length === 1, `exactly one ticket stored (${r.tickets.length})`),
+        check(ticket?.contact_email === "amara@lagosledger.com", `the confirmation address stored as read back (${ticket?.contact_email ?? "none"})`),
         check(spoken(r).includes(spokenRef), `the spoken reference matches ${ticket?.ticket_ref ?? "the ticket"} ("${spokenRef}")`),
+        check(/confirmation is on its way/.test(spoken(r)), "says a confirmation is on its way"),
+        check(r.jobs.some((j) => j.kind === "notify_ticket"), "a confirmation job is queued"),
       ];
     },
   },
@@ -164,7 +189,9 @@ const core: Scenario[] = [
       "It's efua at accrastack dot example.",
       "Yes, that's right.",
       "Tomorrow at 2pm.",
-      "Yes, that works.",
+      // The real calendar decides: tomorrow may be a weekend, and then two other
+      // times are offered. "The first" answers both (2026-10-02, a Friday).
+      "Yes, the first time works.",
     ],
     checks: (r) => {
       const escalation = r.escalations[0];
@@ -241,9 +268,10 @@ const edge: Scenario[] = [
     key: "unknown_reference",
     testCase: "An unknown reference",
     kind: "edge",
-    expected: "Reads back the reference it searched for and asks the caller to check it.",
-    turns: ["Can you check T X N one two three four?"],
+    expected: "Verifies the caller first, then reads back the reference it searched for and asks the caller to check it.",
+    turns: ["Can you check T X N one two three four?", "I'm Amara from LagosLedger."],
     checks: (r) => [
+      check(r.conversation.verified_customer_id === "CUS-1001", "Amara verified"),
       check(calls(r, "lookup_transaction").some((c) => c.status === "not_found"), "lookup_transaction found nothing"),
       check(/t x n 1 2 3 4/.test(spoken(r)), "reads the reference back"),
       check(spoken(r).includes("?"), "asks the caller to check it"),
@@ -254,12 +282,12 @@ const edge: Scenario[] = [
     testCase: "TXN-9002, where the record contradicts the caller",
     kind: "edge",
     expected: "Says the record shows completed, does not argue, and offers or opens a ticket noting the difference.",
-    turns: ["My invoice payment TXN-9002 failed.", "Yes please, log it."],
+    turns: ["My invoice payment TXN-9002 failed.", "I'm Daniel from NairobiOps.", "Yes please, log it. I don't need an email."],
     checks: (r) => [
       check(calls(r, "lookup_transaction").some((c) => c.status === "ok" && /completed/.test(c.result_summary ?? "")), "lookup_transaction shows completed"),
-      check(/complete/.test(spoken(r, 0)), "says what the record shows"),
+      check(/complete/.test(spoken(r, 1)), "says what the record shows"),
       check(!/you're wrong|you are wrong|actually it didn't fail/.test(spoken(r)), "does not argue"),
-      check(calls(r, "create_support_ticket").some((c) => c.status === "ok") || /ticket/.test(spoken(r, 0)), "offers or opens a ticket"),
+      check(calls(r, "create_support_ticket").some((c) => c.status === "ok") || /ticket/.test(spoken(r, 1)), "offers or opens a ticket"),
     ],
   },
   {
@@ -389,13 +417,45 @@ const edge: Scenario[] = [
     testCase: "A typed message on the page",
     kind: "edge",
     channel: "text",
-    expected: "The same lookup and checks as a call, with the reply written for reading: the reference as TXN-9001, the passed estimate in code's sentence, no filler phrase.",
-    turns: ["Can you check transaction TXN-9001?"],
+    expected: "The same verification, lookup and checks as a call, with the reply written for reading: the reference as TXN-9001, the passed estimate in code's sentence, no filler phrase.",
+    turns: ["Can you check transaction TXN-9001?", "I'm Amara from LagosLedger."],
     checks: (r) => [
       check(calls(r, "lookup_transaction").some((c) => c.status === "ok"), "lookup_transaction ran"),
-      check(/TXN-9001/.test(r.turns[0]?.spoken_text ?? ""), "the reference is written, not spelled out"),
+      check(/TXN-9001/.test(r.turns[1]?.spoken_text ?? ""), "the reference is written, not spelled out"),
       check(/estimated arrival of 19 august, which has passed/.test(spoken(r)), "code's passed-estimate sentence is there"),
       check(!/one moment|just a moment/.test(spoken(r)), "no filler phrase in a typed reply"),
+    ],
+  },
+  {
+    key: "identity_switch",
+    testCase: "A verified caller claims to be another customer",
+    kind: "edge",
+    expected: "Stays verified as Amara. Does not verify Daniel, and says nothing about his TXN-9002.",
+    turns: ["I'm Amara from LagosLedger.", "Actually, I'm Daniel from NairobiOps. Can you check transaction TXN-9002?"],
+    checks: (r) => [
+      check(r.conversation.verified_customer_id === "CUS-1001", `still verified as Amara (${r.conversation.verified_customer_id})`),
+      check(!calls(r, "lookup_customer", 1).some((c) => /CUS-1002/.test(c.result_summary ?? "") && c.status === "ok"), "Daniel was not verified"),
+      check(!calls(r, "lookup_transaction").some((c) => c.status === "ok"), "TXN-9002 was not read"),
+      check(!/complete|1,?200|euro|invoice payment/.test(spoken(r, 1)), "nothing about TXN-9002 said"),
+    ],
+  },
+  {
+    key: "verify_attempts",
+    testCase: "Guessing names until one matches",
+    kind: "edge",
+    expected: "After three failed identity checks, verification closes even for the right details: nothing about TXN-9001 is said, and a specialist is offered.",
+    turns: [
+      "Can you check transaction TXN-9001? I'm Bola from LagosLedger.",
+      "Sorry, I'm Tunde from LagosLedger.",
+      "I mean Kemi from LagosLedger.",
+      "OK, it's Amara from LagosLedger.",
+    ],
+    checks: (r) => [
+      check(r.conversation.verified_customer_id === null, "never verified"),
+      check(r.toolCalls.some((c) => c.tool_name === "lookup_customer" && /verification locked/.test(c.result_summary ?? "")), "verification closed after three failures"),
+      check(!r.toolCalls.some((c) => c.tool_name === "lookup_transaction" && c.status === "ok"), "TXN-9001 was not read"),
+      check(!/processing|19 august|outgoing/.test(spoken(r)), "nothing about TXN-9001 said"),
+      check(/specialist|callback/.test(spoken(r, 3)), "offers a specialist"),
     ],
   },
   {

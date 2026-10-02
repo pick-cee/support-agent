@@ -912,6 +912,86 @@
   animation: rise 360ms var(--ease-out) both;
 }
 
+/* During a call: a box to type into the call above Mute and End call, for
+   fixing what speech recognition heard (DESIGN §13). */
+.callDock {
+  display: grid;
+  gap: 10px;
+}
+
+.callType {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 6px 6px 6px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+  animation: rise 320ms var(--ease-out) both;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.callType:focus-within {
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px var(--brand-primary-tint);
+}
+
+.callTypeInput {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: var(--font-size-sm);
+  color: var(--text);
+}
+
+.callTypeInput::placeholder {
+  color: var(--text-subtle);
+}
+
+.callType .sendButton {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+
+/* Under a caller's line: Typed, and Edit to fix what was heard. */
+.lineMeta {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-subtle);
+}
+
+.lineEdit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: var(--brand-primary);
+  cursor: pointer;
+}
+
+.lineEdit:hover {
+  background: var(--surface);
+}
+
 /* --- Buttons ---------------------------------------------------------------------- */
 
 .primaryButton,

@@ -5,7 +5,7 @@ import { dateInZone, daysBetween } from "@/lib/time";
 
 import { lenientInput } from "../lenient-input";
 import type { PayoutRecord, ToolDefinition } from "../types";
-import { COMPLIANCE_TERMS, invalid, mentionsCompliance, refused, refusedAfterEscalation } from "./shared";
+import { COMPLIANCE_TERMS, invalid, mentionsCompliance, notOnAccount, refusedAfterEscalation, verifyFirst } from "./shared";
 
 const ASK = "Ask the caller for the payout reference, which starts with P A Y, or the transaction reference, which starts with T X N.";
 
@@ -37,8 +37,8 @@ export const lookupPayout: ToolDefinition<{ payout_id?: string; transaction_id?:
   name: "lookup_payout",
   title: "Look up a payout",
   description:
-    "Look up a contractor or vendor payout by its payout reference (for example PAY-7002) or by the transaction it belongs to. " +
-    "Returns status, scheduled date, a customer-safe failure reason and summary. Amount, currency and recipient are withheld unless the caller is the verified owner. " +
+    "Look up one of the verified caller's contractor or vendor payouts by its payout reference (for example PAY-7002) or by the transaction it belongs to. Verify the caller with lookup_customer first: until then this refuses and reveals nothing. " +
+    "Returns status, scheduled date, amount, recipient, a customer-safe failure reason and summary. A reference that is not on the caller's account comes back not_on_your_account, whether or not it exists. " +
     "requires_escalation true means a specialist must handle it: say it needs review by a specialist and offer that, never explaining why.",
   wireInput: lenientInput({
     payout_id: { type: "string", description: "The payout reference the caller gave, for example PAY-7002." },
@@ -72,26 +72,15 @@ export const lookupPayout: ToolDefinition<{ payout_id?: string; transaction_id?:
 
     const searched = byPayout ?? byTransaction!;
     if (state?.escalated) return refusedAfterEscalation(searched);
+    const unverified = verifyFirst(state, searched);
+    if (unverified) return unverified;
 
     const payout = byPayout ? await repository.findPayout(byPayout) : await repository.findPayoutByTransaction(byTransaction!);
-    if (!payout) {
-      return {
-        status: "not_found",
-        isError: false,
-        payload: { found: false, reason: "not_found", normalised_id: searched, message: `There is no payout for ${searched} on record. Read the reference back to the caller and ask them to check it.` },
-        summary: `not_found ${searched}`,
-      };
-    }
+    if (!payout) return notOnAccount(searched, "missing");
+    if (state!.verifiedCustomerId !== payout.customer_id) return notOnAccount(searched, "not_owned");
 
-    if (state?.verifiedCustomerId && state.verifiedCustomerId !== payout.customer_id) {
-      return refused(
-        "not_on_your_account",
-        "That reference is not on the verified caller's account. Say you can't find it on their account. Do not say whether it exists.",
-        `refused ${searched}: not on the verified caller's account`,
-      );
-    }
-
-    const disclosed = state?.verifiedCustomerId === payout.customer_id;
+    // Only the verified owner gets this far.
+    const disclosed = true;
     const today = dateInZone(context.clock());
     const etaPassed = payout.status !== "completed" && payout.status !== "failed" && daysBetween(payout.scheduled_for, today) > 0;
     const compliance = mentionsCompliance(payout.failure_reason);

@@ -103,24 +103,28 @@ describe("MCP over HTTP, memory backend", () => {
     expect(data.do_not_speak).toEqual(["customer_id", "kyc_status", "support_notes"]);
   });
 
-  it("lookup_payout says PAY-7002 needs review without naming compliance in what may be spoken", async () => {
+  it("lookup_payout says PAY-7002 needs review without naming compliance in what may be spoken, to its verified owner", async () => {
+    await call(client, "lookup_customer", { contact_name: "Efua", company_name: "AccraStack" });
     const { data } = await call(client, "lookup_payout", { payout_id: "P A Y seven zero zero two" });
-    expect(data).toMatchObject({ found: true, payout_id: "PAY-7002", status: "review required", requires_escalation: true, support_summary: "This payout needs review by a specialist.", amount: null, recipient_name: null });
+    expect(data).toMatchObject({ found: true, payout_id: "PAY-7002", status: "review required", requires_escalation: true, support_summary: "This payout needs review by a specialist.", recipient_name: "Kente Labs", disclosure: "verified_owner" });
     expect(data.do_not_speak).toEqual(["failure_reason"]);
   });
 
   it("lookup_payout finds a payout by its transaction, and refuses someone else's", async () => {
+    await call(client, "lookup_customer", { contact_name: "Amina", company_name: "CapeCloud" });
     expect((await call(client, "lookup_payout", { transaction_id: "TXN-9004" })).data).toMatchObject({ payout_id: "PAY-7003", support_summary: "This payout failed because beneficiary details need review." });
-    await call(client, "lookup_customer", { contact_name: "Amara", company_name: "LagosLedger" });
     expect((await call(client, "lookup_payout", { payout_id: "PAY-7002" })).data).toMatchObject({ found: false, reason: "not_on_your_account" });
   });
 
-  it("lookup_payout reports a missing payout and bad input", async () => {
-    expect((await call(client, "lookup_payout", { payout_id: "PAY-9999" })).data).toMatchObject({ found: false, reason: "not_found" });
+  it("lookup_payout refuses an unverified caller, and answers a missing payout like someone else's", async () => {
+    expect((await call(client, "lookup_payout", { payout_id: "PAY-7001" })).data).toMatchObject({ found: false, reason: "verify_first" });
+    await call(client, "lookup_customer", { contact_name: "Amara", company_name: "LagosLedger" });
+    expect((await call(client, "lookup_payout", { payout_id: "PAY-9999" })).data).toMatchObject({ found: false, reason: "not_on_your_account" });
     expect((await call(client, "lookup_payout", {})).isError).toBe(true);
   });
 
-  it("create_support_ticket raises the priority floor and returns the same ticket on a retry", async () => {
+  it("create_support_ticket raises the priority floor for the verified owner and returns the same ticket on a retry", async () => {
+    await call(client, "lookup_customer", { contact_name: "Amara", company_name: "LagosLedger" });
     const args = { category: "payment", priority: "low", summary: "Caller reports TXN-9001 has not arrived.", conversation_id: "made-up", transaction_id: "TXN-9001" };
     const first = await call(client, "create_support_ticket", args);
     const second = await call(client, "create_support_ticket", args);
@@ -134,6 +138,50 @@ describe("MCP over HTTP, memory backend", () => {
     const { data } = await call(client, "create_support_ticket", { category: "invoice", priority: "normal", summary: "Invoice payment failed.", conversation_id: conversationId, transaction_id: "TXN-1234" });
     expect(data.created).toBe(true);
     expect(repository.tickets[0]).toMatchObject({ transactionId: null, reportedReference: "TXN-1234" });
+  });
+
+  it("create_support_ticket links no record for an unverified caller, so nothing about it comes back", async () => {
+    const { data } = await call(client, "create_support_ticket", { category: "payout", priority: "low", summary: "Caller asks about a payout.", conversation_id: conversationId, transaction_id: "TXN-9003" });
+    expect(data).toMatchObject({ created: true, priority: "normal", priority_raised: null });
+    expect(JSON.stringify(data)).not.toMatch(/review/);
+    expect(repository.tickets[0]).toMatchObject({ transactionId: null, reportedReference: "TXN-9003" });
+  });
+
+  it("create_support_ticket queues the caller's confirmation email once, and never for an address that cannot receive it", async () => {
+    const base = { category: "invoice", priority: "normal", summary: "Invoice payment failed.", conversation_id: conversationId };
+    const first = await call(client, "create_support_ticket", { ...base, contact_email: "amara at lagosledger dot com" });
+    const retry = await call(client, "create_support_ticket", { ...base, contact_email: "amara at lagosledger dot com" });
+    expect(first.data).toMatchObject({ created: true, confirmation_email: "queued" });
+    expect(retry.data).toMatchObject({ created: false, confirmation_email: "queued" });
+    expect(repository.tickets[0]).toMatchObject({ contactEmail: "amara@lagosledger.com", confirmation_status: "pending" });
+    expect(repository.jobs.filter((job) => job.kind === "notify_ticket")).toHaveLength(1);
+
+    const seed = await call(client, "create_support_ticket", { ...base, category: "payment", contact_email: "efua@accrastack.example" });
+    expect(seed.data).toMatchObject({ created: true, confirmation_email: "none" });
+    expect(repository.tickets[1]).toMatchObject({ confirmation_status: "skipped_undeliverable" });
+    expect(repository.jobs.filter((job) => job.kind === "notify_ticket")).toHaveLength(1);
+
+    expect((await call(client, "create_support_ticket", { ...base, category: "refund", use_email_on_file: true })).data).toMatchObject({ error_code: "invalid_input" });
+    expect((await call(client, "create_support_ticket", { ...base, category: "refund", contact_email: "amara at lagos" })).data).toMatchObject({ error_code: "invalid_input" });
+  });
+
+  it("lookup_customer keeps one identity per conversation, whether the other details are real or not", async () => {
+    await call(client, "lookup_customer", { contact_name: "Amara", company_name: "LagosLedger" });
+    const real = await call(client, "lookup_customer", { contact_name: "Daniel", company_name: "NairobiOps" });
+    const fake = await call(client, "lookup_customer", { contact_name: "Nobody", company_name: "NoSuchCo" });
+    expect(real.data).toMatchObject({ found: false, reason: "already_verified" });
+    expect(real.data).toEqual(fake.data);
+    expect((await call(client, "lookup_customer", { contact_name: "Amara", company_name: "LagosLedger" })).data).toMatchObject({ found: true, customer_id: "CUS-1001" });
+    expect((await repository.conversationState(conversationId))?.verifiedCustomerId).toBe("CUS-1001");
+    expect((await call(client, "lookup_transaction", { transaction_id: "TXN-9002" })).data).toMatchObject({ reason: "not_on_your_account" });
+  });
+
+  it("lookup_customer closes verification after three failed attempts, even for the right details", async () => {
+    for (const name of ["Bola", "Tunde"]) expect((await call(client, "lookup_customer", { contact_name: name, company_name: "LagosLedger" })).data).toMatchObject({ reason: "not_verified" });
+    expect((await call(client, "lookup_customer", { contact_name: "Kemi", company_name: "LagosLedger" })).data).toMatchObject({ reason: "verification_locked" });
+    expect((await call(client, "lookup_customer", { contact_name: "Amara", company_name: "LagosLedger" })).data).toMatchObject({ reason: "verification_locked" });
+    expect((await call(client, "lookup_transaction", { transaction_id: "TXN-9001" })).data).toMatchObject({ reason: "verification_locked" });
+    expect((await repository.conversationState(conversationId))?.verifiedCustomerId).toBeNull();
   });
 
   it("find_callback_slots parses the caller's words in their zone and says when the calendar is unavailable", async () => {
@@ -210,7 +258,7 @@ describe("MCP over HTTP, memory backend", () => {
     await call(client, "lookup_transaction", { transaction_id: "TXN-9001" });
     expect(repository.toolCalls.map((log) => [log.status, log.conversationId, log.via])).toEqual([
       ["invalid_input", conversationId, "agent"],
-      ["ok", conversationId, "agent"],
+      ["refused", conversationId, "agent"],
     ]);
   });
 });
@@ -253,6 +301,8 @@ describe("MCP over stdio, memory backend", () => {
 
   it("serves the same eight tools, a lookup, an escalation and the refusal after it", async () => {
     expect((await client.listTools()).tools).toHaveLength(8);
+    expect((await call(client, "lookup_transaction", { transaction_id: "TXN-9002" })).data).toMatchObject({ found: false, reason: "verify_first" });
+    expect((await call(client, "lookup_customer", { contact_name: "Daniel", company_name: "NairobiOps" })).data).toMatchObject({ found: true });
     expect((await call(client, "lookup_transaction", { transaction_id: "TXN-9002" })).data).toMatchObject({ found: true, status: "completed" });
     expect((await call(client, "create_escalation", { user_name: "Daniel", user_email: "daniel@nairobiops.example", category: "dispute", reason: "Wants a refund." })).data).toMatchObject({ escalation_ref: "E-2001" });
     expect((await call(client, "lookup_transaction", { transaction_id: "TXN-9002" })).data).toMatchObject({ reason: "escalated" });

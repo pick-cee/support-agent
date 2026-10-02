@@ -12,57 +12,58 @@ import { closePool, queryDb } from "../src/lib/db";
 // failed at first and what changed, each with its FAILURES.md entry.
 // Usage: npm run evidence -- [--model claude-sonnet-5-5]
 
-const ROWS: { key: string; testCase: string; notes: string }[] = [
+/** keys: the scenarios behind one row; a row passes only when all of them do. */
+const ROWS: { keys: string[]; testCase: string; notes: string }[] = [
   {
-    key: "knowledge_answer",
+    keys: ["knowledge_answer"],
     testCase: "Knowledge-grounded answer",
     notes:
       "Failed at first: for a payout-timing question the search ranked longer, keyword-heavy sections above the best match and dropped it (FAILURES 15). Changed: the best meaning match is always returned first. The match threshold was measured on 82 questions, not guessed (evals/retrieval-calibration.md). The brief lists five fee factors but the knowledge base names three, so the agent says only those three. A near miss is now answered with a spoken hedge instead of a refusal (FAILURES 25, 39).",
   },
   {
-    key: "clarify",
+    keys: ["clarify"],
     testCase: "Clarifying question",
     notes:
       "Failed at first: a clarifying question that gave example references (TXN-9001, PAY-7002) was rejected by the invented-number check, replaced with a refusal, and broke the limit of two questions in a row (FAILURES 23). Changed: a clarifying question that fails a check falls back to a fixed clarifying question, and the limit is enforced in code.",
   },
   {
-    key: "customer_lookup",
+    keys: ["customer_lookup"],
     testCase: "Customer lookup",
     notes:
       "Failed at first on Claude Haiku 4.5: told \"I am Amara from LagosLedger\", it asked for a third identifier (FAILURES 24). Changed: the prompt says any two of name, company and email are enough. Verification needs two identifiers that agree on one record; the tool never returns contact details, and a miss and a partial match get the same reply.",
   },
   {
-    key: "transaction_payout_lookup",
+    keys: ["transaction_payout_lookup", "payout_lookup"],
     testCase: "Transaction or payout lookup",
     notes:
-      "Failed at first: the agent repeated the seed record's \"processing within the normal expected window\" for a payment 41 days past its estimate (FAILURES 4), and once said a transaction needed review when the record did not (FAILURES 9). Changed: the tool flags an outdated summary and a passed estimate, worked out in code, and code writes that sentence; a check removes any review claim the record does not support.",
+      "Failed at first: the agent repeated the seed record's \"processing within the normal expected window\" for a payment 41 days past its estimate (FAILURES 4), and once said a transaction needed review when the record did not (FAILURES 9). Changed: the tool flags an outdated summary and a passed estimate, worked out in code, and code writes that sentence; a check removes any review claim the record does not support. Tightened on 2026-10-02: nothing about a record, not even its status, until the caller is verified, and a reference that is not theirs reads exactly like one that does not exist. TXN-9001 and PAY-7002 belong to different customers and a call is one account, so they are two conversations.",
   },
   {
-    key: "ticket",
+    keys: ["ticket"],
     testCase: "Ticket creation",
     notes:
-      "Failed at first on Claude Haiku 4.5: it would not open a ticket without a reference (FAILURES 24). Changed: the prompt opens the ticket when the caller has none. A retry cannot create a second ticket (unique key), and the reference the caller hears is written by code from the tool result, never by the model.",
+      "Failed at first on Claude Haiku 4.5: it would not open a ticket without a reference (FAILURES 24). Changed: the prompt opens the ticket when the caller has none. A retry cannot create a second ticket (unique key), and the reference the caller hears is written by code from the tool result, never by the model. Added on 2026-10-02: the agent asks where to send a confirmation and reads the email back, and the outbox emails the customer their reference; nothing is promised for an address that cannot receive mail.",
   },
   {
-    key: "escalation",
+    keys: ["escalation"],
     testCase: "Human escalation",
     notes:
-      "Failed at first: reading the email back (\"efua at accrastack dot example. Is that right?\") was blocked because the email check read the sentence end as part of the address (FAILURES 18); the pattern was fixed. Still open: the turn that books the callback is the slowest and can pass the 14 s limit (FAILURES 36, 37). When it does, the escalation is already made and the caller hears what code wrote from it, not silence or a guess; the wait after the limit was cut from about 7 s to 1 s. A real booking and handoff email were made on a live call (E-2004, booked for 1 October, 2 PM Lagos time, email sent).",
+      "Failed at first: reading the email back (\"efua at accrastack dot example. Is that right?\") was blocked because the email check read the sentence end as part of the address (FAILURES 18); the pattern was fixed. Still open: the turn that books the callback is the slowest and can pass the 14 s limit (FAILURES 36, 37). When it does, the escalation is already made and the caller hears what code wrote from it, not silence or a guess; the wait after the limit was cut from about 7 s to 1 s. Real bookings and handoff emails were made on live calls: E-2004 on 30 September and E-2014 on 2 October, the second after the callback calendar was recreated.",
   },
   {
-    key: "unsupported",
+    keys: ["unsupported"],
     testCase: "Unsupported question",
     notes:
       "Failed at first: my own check rejected a correct refusal that said \"promise\" rather than \"guarantee\" (FAILURES 17). Changed: the check accepts the brief's wording, then was tightened to one sentence after it passed a reply that never answered (FAILURES 21). The agent now offers to check the caller's own payout after the general answer.",
   },
   {
-    key: "voice",
+    keys: ["voice"],
     testCase: "Voice flow",
     notes:
       "Failed at first: by Vapi's own measurements a reply took 6 to 7 s, because Vapi held the \"One moment\" line until the whole answer arrived; the call did not end on the goodbye; and \"let me check that\" was said before \"goodbye\" (FAILURES 46 to 48). Changed: every piece of a reply is sent to the voice at once, the end-call phrase matches Vapi's transcription of it, the filler plays only when a lookup starts, and a plain goodbye is answered without the model. Every call also emailed a false \"went quiet\" warning (FAILURES 50); now only a pattern is emailed.",
   },
   {
-    key: "logging",
+    keys: ["logging"],
     testCase: "Logging",
     notes:
       "Failed at first: my logging check required tool-call rows in every conversation, so it failed conversations that rightly used no tools (FAILURES 20). Changed: it compares, tool by tool, what the agent saw with what the MCP server logged. Eval conversations also never ended (FAILURES 31); every conversation now ends with a final status and summary. The MCP server logs every call itself, refusals and errors included.",
@@ -149,25 +150,30 @@ async function main(): Promise<void> {
     "| --- | --- | --- | --- | --- |",
   ];
   for (const row of ROWS) {
-    if (row.key === "voice") {
+    if (row.keys[0] === "voice") {
       const voice = await voiceRow();
       lines.push(`| ${row.testCase} | ${cell(voice.expected)} | ${cell(voice.actual)} | ${voice.passed} | ${cell(row.notes)} |`);
       continue;
     }
-    const evaluation = (
-      await queryDb<{ expected_behavior: string; actual_behavior: string; passed: boolean; notes: string | null }>(
-        `select expected_behavior, actual_behavior, passed, notes from support_agent.evaluations where eval_run_id = $1 and scenario_key = $2 limit 1`,
-        [latestRun.id, row.key],
+    const evaluations = (
+      await queryDb<{ scenario_key: string; expected_behavior: string; actual_behavior: string; passed: boolean; notes: string | null }>(
+        `select scenario_key, expected_behavior, actual_behavior, passed, notes from support_agent.evaluations where eval_run_id = $1 and scenario_key = any($2)`,
+        [latestRun.id, row.keys],
       )
-    ).rows[0];
-    if (!evaluation) {
+    ).rows.sort((a, b) => row.keys.indexOf(a.scenario_key) - row.keys.indexOf(b.scenario_key));
+    if (evaluations.length !== row.keys.length) {
       lines.push(`| ${row.testCase} |  | Not in the latest run. | Not yet | ${cell(row.notes)} |`);
       continue;
     }
-    const runs = sinceBy.get(row.key);
-    const passed = `${evaluation.passed ? "Yes" : "No"}${runs && runs.runs > 1 ? ` (runs: ${runs.passes} of ${runs.runs})` : ""}`;
-    const notes = [evaluation.notes && !evaluation.passed ? `This run: ${evaluation.notes}.` : null, row.notes].filter(Boolean).join(" ");
-    lines.push(`| ${row.testCase} | ${cell(evaluation.expected_behavior)} | ${trimmed(cell(evaluation.actual_behavior))} | ${passed} | ${cell(notes)} |`);
+    const counted = row.keys.map((key) => sinceBy.get(key)).filter((value) => value !== undefined);
+    const runs = { runs: counted.reduce((sum, value) => sum + value.runs, 0), passes: counted.reduce((sum, value) => sum + value.passes, 0) };
+    const allPassed = evaluations.every((evaluation) => evaluation.passed);
+    const passed = `${allPassed ? "Yes" : "No"}${runs.runs > row.keys.length ? ` (runs: ${runs.passes} of ${runs.runs})` : ""}`;
+    const failures = evaluations.filter((evaluation) => !evaluation.passed && evaluation.notes).map((evaluation) => `This run: ${evaluation.notes}.`);
+    const notes = [...failures, row.notes].join(" ");
+    const expected = evaluations.map((evaluation) => cell(evaluation.expected_behavior)).join(" ");
+    const actual = evaluations.map((evaluation) => trimmed(cell(evaluation.actual_behavior), Math.floor(900 / evaluations.length))).join(" || ");
+    lines.push(`| ${row.testCase} | ${expected} | ${actual} | ${passed} | ${cell(notes)} |`);
   }
   lines.push("");
   writeFileSync("docs/testing-evidence.md", `${lines.join("\n")}\n`);

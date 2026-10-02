@@ -54,6 +54,8 @@ export type EmailContent = {
   /** Why this person received it. */
   reason: string;
   manageUrl?: string | null;
+  /** Who it is from, at the foot; the team's emails default to the support system. */
+  signature?: string;
 };
 
 export type Attachment = { filename: string; content: string; content_id: string };
@@ -160,7 +162,7 @@ export function renderEmail(content: EmailContent): { html: string; text: string
         ${action}
       </td></tr>
       <tr><td style="padding:20px 8px 0;font-family:${FONT};font-size:12px;line-height:19px;color:${COLOURS.textSubtle};">
-        ${escapeHtml(content.reason)}${manage}<br>${escapeHtml(EMAIL.signature)}
+        ${escapeHtml(content.reason)}${manage}<br>${escapeHtml(content.signature ?? EMAIL.signature)}
       </td></tr>
     </table>
   </td></tr>
@@ -187,7 +189,7 @@ export function renderEmail(content: EmailContent): { html: string; text: string
     "--",
     content.reason,
     ...(content.manageUrl ? [`${EMAIL.manage}: ${content.manageUrl}`] : []),
-    EMAIL.signature,
+    content.signature ?? EMAIL.signature,
   ].join("\n");
 
   return { html, text, attachments: attachment ? [attachment] : [] };

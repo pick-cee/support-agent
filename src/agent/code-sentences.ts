@@ -58,6 +58,8 @@ export function codeSentences(toolCalls: ToolCallRecord[], now: Date): CodeSente
   } else if (ticket?.result) {
     covers.ticket = true;
     sentences.push(SPOKEN.ticketOpened(String(ticket.result.ticket_ref)));
+    // Said only when the outbox has the email; never for an address that cannot receive it.
+    if (ticket.result.confirmation_email === "queued") sentences.push(SPOKEN.ticketConfirmation);
   }
   return { sentences, covers };
 }

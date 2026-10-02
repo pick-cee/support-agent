@@ -49,4 +49,9 @@ describe("codeSentences", () => {
     expect(codeSentences([call("create_support_ticket", { ticket_ref: "T-4001" })], NOW).sentences).toEqual([SPOKEN.ticketOpened("T-4001")]);
     expect(codeSentences([call("create_support_ticket", { ticket_ref: "T-4001" }, true)], NOW).sentences).toEqual([]);
   });
+
+  it("says a confirmation email is coming only when the outbox has one queued", () => {
+    expect(codeSentences([call("create_support_ticket", { ticket_ref: "T-4001", confirmation_email: "queued" })], NOW).sentences).toEqual([SPOKEN.ticketOpened("T-4001"), SPOKEN.ticketConfirmation]);
+    expect(codeSentences([call("create_support_ticket", { ticket_ref: "T-4001", confirmation_email: "none" })], NOW).sentences).toEqual([SPOKEN.ticketOpened("T-4001")]);
+  });
 });
