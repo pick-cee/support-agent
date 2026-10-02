@@ -878,3 +878,27 @@ here, never from memory afterwards.
 - **Fix:** in the customer list the label wraps beside its dot, the columns
   were rebalanced, and on a phone the status goes under the name. Checked in
   Edge at 1366 px and 390 px.
+
+### 61. Three vague answers: a pointless identity check, then a question about nothing
+
+- **When:** 2026-10-02, the full eval run (`clarify_cap` failed, 26 of 27).
+- **Symptom:** to "My payment is stuck." then "It's just not working.", the
+  agent asked for the caller's company and first name (3 of 3 runs). To the
+  third vague answer it said "That's okay, I can still help. Would you like
+  me to set that up?", which points at nothing.
+- **Root cause, two parts.** The prompt said when to verify, not when not
+  to, and without a reference there is nothing to look up: no tool lists a
+  customer's payments. And the review cleanup removed the agent's offer, "I
+  can arrange a callback so a specialist can look into it with you.",
+  because a specialist offer was only allowed on a decline; the question
+  after it was not recognised as pointing back, so it stayed.
+- **Fix:** the prompt asks for identity only when there is a reference or a
+  question about the caller's own account, and otherwise offers a ticket or
+  a specialist. The cleanup keeps a plain offer on a clarifying question too
+  (a claim of review still goes), and recognises "Would you like me to set
+  that up?" and similar as pointing back. Unit tests from the real reply. With
+  the cleanup change alone, two reruns passed but still asked for identity
+  on the second turn. With both, two more reruns asked for the reference and
+  offered a ticket or a specialist on the second turn (an offer the old
+  cleanup would have removed), and opened a ticket on the third; the lookup,
+  ticket and identity scenarios passed alongside.

@@ -285,7 +285,9 @@ const OFFER = /\b(i can|i could|i'd be happy to|would you like|do you want|shall
 const REVIEW_CLAIM = /\b(needs?|needed|requires?|required|under|being|been|will be|is with)\b[^.?!]*\b(review\w*|escalat\w*)\b|\b(review\w*|escalat\w*)\b[^.?!]*\b(needed|required|pending|underway|in progress)\b/i;
 // A question that only points back at the sentence before it ("Would you like
 // that?") means nothing once that sentence is gone (the Bitcoin eval, 2026-09-29).
-const BACK_REFERENCE = /^(would you like (that|this|me to(?: do that| arrange that)?)|shall i( do that| arrange that| set that up)?|do you want (that|this|me to(?: do that)?)|should i( do that)?|is that (okay|ok|all right|alright)|does that (work|sound good))\s*\??$/i;
+// "Would you like me to set that up?" was left alone after its offer went (eval, 2026-10-02).
+const BACK_REFERENCE =
+  /^(would you like (that|this|me to(?: (?:do|arrange|book|organi[sz]e) (?:that|this|it)| set (?:that|this|it) up)?)|shall i( do that| arrange that| book that| set that up)?|do you want (that|this|me to(?: do that| arrange that| set that up)?)|should i( do that| set that up)?|is that (okay|ok|all right|alright)|does that (work|sound good))\s*\??$/i;
 const REMOVED_SENTENCE_MAX_CHARS = 200;
 // A closing reply ends with the fixed goodbye code adds; the model's own sign-off would say it twice.
 const GOODBYE_TALK = /\b(?:thanks|thank you) for (?:calling|contacting|reaching out|getting in touch|choosing)\b|\bgoodbye\b|\bhave a (?:great|good|nice|lovely) (?:day|evening|afternoon|morning|week)\b|\btake care\b/i;
@@ -298,7 +300,9 @@ function cleanups(input: GateInput): Cleanup[] {
     .map((call) => call.result.support_summary as string);
   const sensitive = [...new Set(input.toolCalls.filter(succeeded).flatMap((call) => (Array.isArray(call.result.sensitive_terms) ? (call.result.sensitive_terms as string[]) : [])))];
   const escalationPath = ["escalate", "collect_details"].includes(input.answer.answer_type);
-  const declining = input.answer.answer_type === "decline";
+  // An offer of a specialist stays on a decline and on a clarifying question: after
+  // vague answers, offering a callback is the way out of asking again (eval, 2026-10-02).
+  const offerAllowed = input.answer.answer_type === "decline" || input.answer.answer_type === "clarify";
   const kbSaysReview = input.toolCalls.some((call) => call.name === "search_knowledge_base" && succeeded(call) && REVIEW_TALK.test(JSON.stringify(call.result.chunks ?? [])));
   const reviewBacked = input.escalated || escalationPath || kbSaysReview || input.toolCalls.some((call) => succeeded(call) && (call.result.requires_escalation === true || call.result.routing === "escalate_account_questions"));
 
@@ -319,7 +323,7 @@ function cleanups(input: GateInput): Cleanup[] {
       applies: !reviewBacked,
       // A question is not a claim either ("...or are you telling me when you'd like a
       // specialist to call?"): removing it once left a reply with nothing in it.
-      drop: (sentence) => REVIEW_TALK.test(sentence) && !((sentence.trim().endsWith("?") || (declining && OFFER.test(sentence))) && !REVIEW_CLAIM.test(sentence)),
+      drop: (sentence) => REVIEW_TALK.test(sentence) && !((sentence.trim().endsWith("?") || (offerAllowed && OFFER.test(sentence))) && !REVIEW_CLAIM.test(sentence)),
       why: "claiming a review the record does not show",
     },
     // "You're welcome. Thanks for contacting RelayPay." then code's goodbye: said twice (typed test, 2026-09-30).

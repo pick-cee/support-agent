@@ -109,9 +109,21 @@ describe("gates, with the outputs Phase 0 actually produced", () => {
     expect(verdict.text).toBe("TXN-9001 is still processing.");
   });
 
-  it("does not treat an offer as allowed outside a decline", () => {
+  it("does not treat an offer as allowed on a lookup result", () => {
     const verdict = gate({ toolCalls: [TXN_9001], answer: answer({ spoken_text: "TXN-9001 is still processing. I can arrange for a specialist to look into it." }) });
     expect(verdict.text).toBe("TXN-9001 is still processing.");
+  });
+
+  // The clarify_cap eval on 2026-10-02: after vague answers the agent offered a
+  // callback, the offer was removed, and "Would you like me to set that up?" was
+  // spoken pointing at nothing.
+  it("keeps a specialist offer on a clarifying question, and drops a question left pointing at a removed offer", () => {
+    const offer = "That's okay, I can still help. I can arrange a callback so a specialist can look into it with you. Would you like me to set that up?";
+    const callerTexts = ["My payment is stuck.", "It's just not working.", "I don't know, it's just stuck."];
+    expect(gate({ callerTexts, clarifyStreak: 1, answer: answer({ answer_type: "clarify", spoken_text: offer }) }).text).toBe(offer);
+
+    const claim = gate({ toolCalls: [TXN_9001], answer: answer({ spoken_text: "TXN-9001 is processing. This needs a specialist to review. Would you like me to set that up?" }) });
+    expect(claim.text).toBe("TXN-9001 is processing.");
   });
 
   it("removes the model's own sign-off from a closing reply, because code adds the goodbye", () => {
