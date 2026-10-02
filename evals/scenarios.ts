@@ -61,6 +61,14 @@ const spoken = (record: EvalRecord, index?: number) =>
   (index === undefined ? record.turns.map((turn) => turn.spoken_text ?? "").join(" ") : (record.turns[index]?.spoken_text ?? "")).toLowerCase();
 const calls = (record: EvalRecord, tool: string, turn?: number) => record.toolCalls.filter((call) => call.tool_name === tool && (turn === undefined || call.turn_index === turn));
 const check = (ok: boolean, says: string): Check => ({ ok, says });
+/** FAILURES 37: the turn that books uses the times offered earlier, rather than searching again. */
+const bookedWithoutResearch = (record: EvalRecord) => {
+  const booking = calls(record, "create_escalation").find((call) => call.status === "ok");
+  if (booking?.turn_index == null) return false;
+  const turn = booking.turn_index;
+  const searchedBefore = record.toolCalls.some((call) => call.tool_name === "find_callback_slots" && call.turn_index !== null && call.turn_index < turn);
+  return !searchedBefore || calls(record, "find_callback_slots", turn).length === 0;
+};
 const noEmailSpoken = (text: string) => !/@|\bat [a-z]+ dot [a-z]+/.test(text);
 const lastTurn = (record: EvalRecord) => record.turns[record.turns.length - 1];
 const promises = (text: string) =>
@@ -204,6 +212,7 @@ const core: Scenario[] = [
         check(/efua/i.test(escalation?.user_name ?? ""), "name stored"),
         check(r.jobs.some((j) => j.kind === "book_callback"), "a booking job exists"),
         check(r.jobs.some((j) => j.kind === "notify_escalation"), "a notification job exists"),
+        check(bookedWithoutResearch(r), "the chosen time was booked without searching the calendar again"),
         check(/efua at accrastack dot example|efua@accrastack\.example/.test(spoken(r)), "the email was read back"),
         check(!/complian/.test(spoken(r)), "no compliance explanation"),
         check(!/\b\d+\s*(business |working )?days?\b|\b(one|two|three|four|five) (business |working )?days?\b/.test(spoken(r)), "no timeline for the review"),
@@ -308,6 +317,7 @@ const edge: Scenario[] = [
     checks: (r) => [
       check(calls(r, "create_escalation").some((c) => c.status === "ok"), "create_escalation succeeded"),
       check(r.escalations.length === 1, `one escalation despite the repeat (${r.escalations.length})`),
+      check(bookedWithoutResearch(r), "the chosen time was booked without searching the calendar again"),
       check(r.escalations[0]?.user_email === "amara@lagosledger.example", `email normalised to amara@lagosledger.example (${r.escalations[0]?.user_email ?? "none"})`),
       check(!/processing/.test(spoken(r, 7)), "no account detail after escalation"),
       check(calls(r, "lookup_transaction", 7).every((c) => c.status === "refused"), "any lookup after escalation was refused"),

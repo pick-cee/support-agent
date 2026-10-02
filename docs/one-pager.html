@@ -22,7 +22,7 @@
 <body>
 <h1>RelayPay Support Agent</h1>
 <p class="tagline">A voice and chat support line that answers from approved knowledge, checks payments when it is safe, and hands a case to a person with a booked callback. It never guesses and never drops a case.</p>
-<p class="meta"><b>Owner</b> Akinloluwa &nbsp;&nbsp; <b>Updated</b> 1 October 2026 &nbsp;&nbsp; <b>App</b> <a href="https://support-agent-gamma-two.vercel.app/">support-agent-gamma-two.vercel.app</a> &nbsp;&nbsp; <b>Repo</b> <a href="https://github.com/pick-cee/support-agent">github.com/pick-cee/support-agent</a></p>
+<p class="meta"><b>Owner</b> Akinloluwa &nbsp;&nbsp; <b>Updated</b> 2 October 2026 &nbsp;&nbsp; <b>App</b> <a href="https://support-agent-gamma-two.vercel.app/">support-agent-gamma-two.vercel.app</a> &nbsp;&nbsp; <b>Repo</b> <a href="https://github.com/pick-cee/support-agent">github.com/pick-cee/support-agent</a></p>
 
 <h2>PURPOSE AND SUCCESS CRITERIA</h2>
 <p>RelayPay's customers are businesses moving money across African corridors. When a payment is late they want an answer now, and a support team cannot pick up every call. A first line that guesses is worse than none: a wrong arrival date or another customer's email read aloud costs more trust than a wait.</p>
@@ -38,12 +38,12 @@
 <ol>
 <li><b>Call or type.</b> Press the microphone on the page, or type. Say references such as TXN-9001 out loud.</li>
 <li><b>Ask, check, or ask for a person.</b> A reference is checked once two details match, and only if it is yours. Misheard? Tap Edit and type it. Anything a person should handle gets a ticket or a callback.</li>
-<li><b>Work the console.</b> Overview shows the week, Escalations who to call, when and why, and Conversations every reply with what was checked first.</li>
+<li><b>Work the console.</b> Overview shows the week, Escalations who to call, when and why, Conversations every reply with what was checked first, and Customers who each caller was and their history.</li>
 <li><b>Teach it.</b> Knowledge lists what it could not answer. Write the answer once, or post a service notice, and it is used from the next question.</li>
 </ol>
 
 <h2>ASSUMPTIONS AND LIMITS</h2>
-<p>Identity is two matching facts, not authentication; production would send a one-time code. English only. The seed data is static and dated. A fresh agent process starts every turn: replies averaged 4.6 to 6.3 seconds on live calls (Vapi's measurement), and the booking turn can pass the 14 second limit, when the caller hears what was already done. No phone number: Vapi's free numbers are US only. AI cost is an estimate, never added to Vapi's bill.</p>
+<p>Identity is two matching facts, not authentication; production would send a one-time code. English only. The seed data is static and dated. A fresh agent process starts every turn: replies averaged 4.6 to 6.3 seconds on live calls (Vapi's measurement), and a turn that passes the 14 second limit still says what was already done. No phone number: Vapi's free numbers are US only. AI cost is an estimate, never added to Vapi's bill.</p>
 
 <h2>TROUBLESHOOTING</h2>
 <p><b>"I couldn't find that reference."</b> Say it again slowly, letters first. It asks rather than guesses.</p>

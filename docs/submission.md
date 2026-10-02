@@ -72,15 +72,16 @@ _Your link here._ A plan for a walkthrough under five minutes:
    nobody is helping me." Name, email (read back), a time, booked. The summary
    card. (This books a real Cal.com slot and sends the handoff email.)
 4. **2:40 to 3:40. The console.** Overview, the new case in Escalations with the
-   handoff email beside it, a conversation with "what the assistant checked",
-   and Knowledge's questions to answer.
+   handoff email beside it, a conversation with its customer card and "what
+   the assistant checked", the customer's page with their history, and
+   Knowledge's questions to answer.
 5. **3:40 to 4:20. The MCP server.** `npm run mcp:inspect`, list the tools, call
    `lookup_transaction` (refused: verify first), then `lookup_customer` as
    Amara, then `lookup_transaction` again (the status, the amount, and the
    passed estimate worked out in code), then the same calls in Supabase's
    `tool_calls`.
-6. **4:20 to 4:50. Close.** The testing evidence, one limit said plainly (the
-   booking turn can pass the 14 second limit), and why Sonnet.
+6. **4:20 to 4:50. Close.** The testing evidence, one limit said plainly
+   (identity is two matching details, not a one-time code), and why Sonnet.
 
 ## 6. Reflection sheet
 
@@ -121,13 +122,13 @@ answer arrived. I only found that by building a harness that plays a recorded
 caller into a real browser call and reads Vapi's turn metrics. Sending Vapi's
 flush token after every piece fixed the second part: two live calls afterwards
 averaged 4.6 and 6.3 seconds a turn (different conversations, so not a strict
-comparison; the slower one spent its time finding callback slots). The first
-part is still open: the turn that books a callback is the slowest, because each
-turn starts fresh and must look the chosen slot up again, and it passed the 14
-second limit in 1 of 4 runs on the final code (2 of 4 the day before). When it
-does, the escalation already exists and the caller hears what was done, not
-silence. The fix is to keep the offered times on the conversation so confirming
-books at once; it is written up, not built.
+comparison; the slower one spent its time finding callback slots). The turn
+that books a callback was the slowest, because each turn starts fresh and had
+to look the chosen time up again, and it passed the 14 second limit on a live
+call and in the eval. The times offered are now kept on the conversation, so a
+"yes" books at once: that turn went from 14 to 15 seconds to 9 to 10 in the
+eval (five runs, on my machine, not yet on Vercel). The first part, a program
+start on every turn, is still the largest cost.
 
 **3. If you were to start this project again with your current knowledge, what is the one thing you would do differently to make the solution more robust or efficient?**
 
@@ -166,7 +167,9 @@ on every serverless turn.
   tickets and escalations are idempotent on unique keys, and every third-party
   action is reserved, then done, then confirmed.
 - **Callback times.** Past dates, more than 14 days ahead, a sentence cut off
-  mid-time, time zones. Parsed in code (chrono-node), slots read from Cal.com,
+  mid-time, time zones, a busy day before a weekend. Parsed in code
+  (chrono-node), slots read from Cal.com a week ahead, only a time that was
+  offered can be booked, a caller who won't pick a time is still escalated,
   and "booked" is said only when Cal.com returned a booking.
 - **Third parties failing.** Cal.com down: "a specialist will email you".
   Resend failing: retries with backoff through a pg_cron outbox, then an alert.

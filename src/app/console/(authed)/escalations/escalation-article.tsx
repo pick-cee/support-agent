@@ -3,10 +3,12 @@ import Link from "next/link";
 import { categoryLabel, CONSOLE } from "@/app/copy";
 import { ArrowRightIcon, FlagIcon } from "@/app/icons";
 import { age, when, whenWithZone } from "@/lib/console/format";
+import { customerProfile } from "@/lib/console/customers";
 import { conversationDetail, escalationDetail } from "@/lib/console/queries";
 
 import styles from "../../console.module.css";
 import { Avatar, stateLabel, StatusText, statusTone } from "../../parts";
+import { CustomerCard } from "../../customer-card";
 import { Transcript } from "../../transcript";
 import { StatusSelect } from "../../ui";
 import { InboxPlaceholder } from "../conversations/inbox";
@@ -19,6 +21,8 @@ export async function EscalationArticle({ id, showAll }: { id: string; showAll: 
   if (!escalation) return <InboxPlaceholder icon={<FlagIcon size={22} />} title={e.notFound} text={e.select} />;
 
   const conversation = escalation.conversation_id ? await conversationDetail(escalation.conversation_id) : null;
+  // Before calling back: the whole account, or what the caller gave if they were not verified.
+  const customer = conversation?.customer ?? (escalation.customer_id ? await customerProfile(escalation.customer_id) : null);
 
   return (
     <article className={styles.detail}>
@@ -87,6 +91,8 @@ export async function EscalationArticle({ id, showAll }: { id: string; showAll: 
         {escalation.booking_error && <p className={styles.panelError}>{e.bookingFailed(escalation.booking_error)}</p>}
         {escalation.notification_error && <p className={styles.panelError}>{escalation.notification_error}</p>}
       </section>
+
+      <CustomerCard customer={customer} failures={conversation?.conversation.verification_failures ?? 0} gave={{ names: [escalation.user_name], emails: [escalation.user_email] }} />
 
       {conversation && (
         <>

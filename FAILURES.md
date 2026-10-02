@@ -488,6 +488,19 @@ here, never from memory afterwards.
   benchmark. The larger cost, starting a program on every turn (1.9 to 5.1 s
   even when warm, locally), is DESIGN §4's decision, to be made on Vercel's
   numbers.
+- **Seen again on a live call, 2026-10-02:** Akin's booking turn searched the
+  slots twice, then booked, and passed the 14 s deadline; the caller heard
+  the fallback with the code-written booking (the booking went through).
+- **Fixed 2026-10-02** as proposed (migration `0009`, DESIGN §6.5, §7.3).
+  `find_callback_slots` writes what it offered to `conversations.offered_slots`;
+  the next turn's call state lists them with their `start_utc`;
+  `create_escalation` refuses any time that was not offered; the number check
+  accepts an offered time repeated back. In the eval, the booking turn took
+  15.0 s (past the 14 s deadline, fallback) and 14.1 s in the two runs before, each with a
+  second search, and 10.0, 9.8 and 9.1 s in the three runs after, each with
+  one booking call and no second search, answered by the agent. Five runs in
+  all, sandboxed, local machine; not yet measured on Vercel. The scenarios
+  now check the booking turn does not search again.
 
 ### 38. Typing would have failed on every message once deployed
 
@@ -732,7 +745,7 @@ here, never from memory afterwards.
   the records: the two real gaps (support hours, personal transfers) had
   searched; the attack had not.
 
-### 53. The quick goodbye did not fire on a live call
+### 53. The quick goodbye did not fire on a live call (the record was wrong, not the goodbye)
 
 - **When:** 2026-10-01, reading Akin's live call of 30 September (22:14
   Lagos time) for the testing evidence.
@@ -749,6 +762,21 @@ here, never from memory afterwards.
   the wrong reply. The production logs that would confirm it were not kept.
 - **Fix:** `lastAnswerType` reads only turns before the current one, at every
   caller (voice, typing, eval). Not yet seen on a live call.
+- **Corrected 2026-10-02: that cause was wrong.** Akin's call of 2 October
+  showed the same thing, and this time Vapi's own transcript was checked: the
+  caller heard "You're welcome. Goodbye, and thanks for calling RelayPay.",
+  the quick goodbye's exact words, 3.3 s after speaking. The quick goodbye
+  worked both times. The turn record lied: Vapi re-sends a turn while the
+  caller keeps talking, and the first attempt ("Alright. Thank you.", sent to
+  the model) finished after the second attempt's instant reply and wrote its
+  own answer over it, words the caller never heard. Lesson: check what Vapi
+  says was spoken before trusting our record of it.
+- **Real fix:** a turn's result is written only if it is still that turn's
+  latest attempt (`finishTurn` and `finishCheapTurn` match on `attempt`); a
+  superseded attempt's cost still counts, its answer does not. Checked
+  against the real database: attempt 2's instant goodbye was kept and attempt
+  1's late answer refused. The `lastAnswerType` change stays: it is still
+  right that the guard reads the previous turn.
 
 ### 54. The agent read "verify before any lookup" too broadly
 
@@ -780,3 +808,73 @@ here, never from memory afterwards.
   2026-10-01 with the default weekday schedule.
 - **Fix:** the caller answers "Yes, the first time works", which reads
   correctly whether one time or two are offered.
+
+### 56. Anyone could fill the team's inbox with critical alerts
+
+- **When:** 2026-10-02, the production-readiness review.
+- **Symptom:** a request to any unknown path under `/api/vapi/` raised a
+  critical `vapi_unknown_path` alert, and critical alerts are emailed. No
+  credential was needed, so a script could send the team an email per
+  request, and real alerts would drown.
+- **Root cause:** the catch-all route was added to spot a misrouted Vapi
+  call, and raised the alert before checking who was calling.
+- **Fix:** without Vapi's credential it answers a plain 404 and raises
+  nothing. With it, the alert stays: that is a real misconfiguration.
+
+### 57. "Friday at 10am" found nothing to offer
+
+- **When:** 2026-10-02, the eval after the fix to 37.
+- **Symptom:** the agent said Friday 9 October was not free "and I don't have
+  other times for that day", and offered nothing. Cal.com had Monday 12
+  October free from 9 AM.
+- **Root cause:** `find_callback_slots` looked only three days on from the
+  requested day. That Friday had no free times on the calendar (it, and
+  Tuesday 6 October, show no slots at all; probably busy on the connected
+  calendar, not checked), and the weekend followed, so three days held
+  nothing.
+- **Fix:** it looks `SLOT_SEARCH_DAYS` (7) on, never past the booking
+  horizon. The rerun offered Monday 12 October at 9 AM or 9:30 AM. A search
+  that finds nothing now also clears the earlier offer, so an old time is not
+  offered again.
+
+### 58. The caller asked to escalate and was asked for a time again
+
+- **When:** 2026-10-02, the same run.
+- **Symptom:** offered two Monday times, the scripted caller said "Yes, book
+  that." The agent rightly asked which one. Then "Please escalate it again, I
+  really need this sorted." got the same question a third time, and no
+  escalation was made.
+- **Root cause:** the prompt said to call `create_escalation` once the caller
+  had chosen a time, and nothing about a caller who won't or can't choose.
+- **Fix:** the prompt says never to hold the escalation for a time: if the
+  caller asks to go ahead, or doesn't pick one when asked again, escalate
+  without a slot, and code says a specialist will email to arrange a time.
+  The rerun escalated on that turn and refused the lookup after it.
+
+### 59. A test call never got an answer, because of the test's fake microphone
+
+- **When:** 2026-10-02, re-testing a web call after the security headers.
+- **Symptom:** four test calls through the local page: the greeting played,
+  a typed message reached Vapi, our server was never asked for a reply, and
+  Vapi ended each call on its silence timeout.
+- **Root cause:** the test, not the product. With no audio file, the
+  browser's fake microphone plays a constant beep; Vapi took it as a caller
+  still talking and waited for them to stop. The recorded-caller version of
+  the test failed for a related reason: the greeting is now longer than the
+  recording's lead-in, so the caller spoke over it. The production endpoint
+  answered the same question directly (first words in 8.0 s).
+- **Fix:** the test feeds two minutes of silence and types after the greeting.
+  The call then connected, played the full greeting and answered the typed
+  question in 6.1 s, with the headers in place. The test calls were deleted
+  from the records.
+
+### 60. The customer list ran its status into the next column
+
+- **When:** 2026-10-02, screenshots of the new Customers page.
+- **Symptom:** "Waiting for business verification" ran over the next column
+  on a wide screen, and on a phone the status sat on top of the names.
+- **Root cause:** status labels never wrap (right for the inbox rows, wrong
+  in a narrow column), and the phone layout kept two columns.
+- **Fix:** in the customer list the label wraps beside its dot, the columns
+  were rebalanced, and on a phone the status goes under the name. Checked in
+  Edge at 1366 px and 390 px.

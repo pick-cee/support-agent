@@ -18,6 +18,7 @@ import { systemClock } from "../src/lib/time";
 import { createMcpHttp } from "../src/mcp/http";
 import { supabaseServices } from "../src/mcp/services";
 import { supabaseRepository } from "../src/mcp/supabase-repository";
+import type { OfferedSlot } from "../src/mcp/types";
 
 // npm run eval (DESIGN §18.2): every scenario through runTurn(), the function
 // the Vapi route calls, in text mode, with the same cheap checks first. The
@@ -100,12 +101,17 @@ async function runScenario(scenario: Scenario, runId: string, model: string, def
   const outcomes: TurnOutcome[] = [];
   for (const [turnIndex, line] of scenario.turns.entries()) {
     transcript.push({ role: "caller", text: line });
-    const state = (await queryDb<{ verified_customer_id: string | null; escalation_id: string | null; clarify_streak: number }>(`select verified_customer_id, escalation_id, clarify_streak from support_agent.conversations where id = $1`, [conversation.id])).rows[0]!;
+    const state = (
+      await queryDb<{ verified_customer_id: string | null; escalation_id: string | null; clarify_streak: number; offered_slots: OfferedSlot[] | null }>(
+        `select verified_customer_id, escalation_id, clarify_streak, offered_slots from support_agent.conversations where id = $1`,
+        [conversation.id],
+      )
+    ).rows[0]!;
     const check = checkBeforeModel({ userText: line, turnIndex, spentTodayUsd: 0, lastAnswerType: turnIndex > 0 ? await lastAnswerType(conversation.id, turnIndex) : null });
     const userText = check.action === "run" ? check.userText : line;
     const turn = await beginTurn({ conversationId: conversation.id, turnIndex, userText, truncated: check.action === "run" && check.truncated });
     if (check.action === "reply") {
-      await finishCheapTurn(turn.id, { spokenText: check.text, answerType: check.answerType, reason: check.reason, ttftMs: 0 });
+      await finishCheapTurn(turn, { spokenText: check.text, answerType: check.answerType, reason: check.reason, ttftMs: 0 });
       await recordTurnOnConversation(conversation.id, { turnIndex, clarifyStreak: state.clarify_streak, costEstimateUsd: 0 });
       transcript.push({ role: "agent", text: check.text });
       continue;
@@ -119,6 +125,7 @@ async function runScenario(scenario: Scenario, runId: string, model: string, def
       verified: state.verified_customer_id !== null,
       escalated: state.escalation_id !== null,
       clarifyStreak: state.clarify_streak,
+      offeredSlots: state.offered_slots ?? [],
       model,
       now: new Date(),
       signal: new AbortController().signal,
@@ -129,7 +136,7 @@ async function runScenario(scenario: Scenario, runId: string, model: string, def
       ...(typed ? { channel: "text" as const, deadlineMs: TEXT_TURN_DEADLINE_MS } : {}),
     });
     outcomes.push(outcome);
-    await finishTurn(turn.id, outcome);
+    await finishTurn(turn, outcome);
     await recordTurnOnConversation(conversation.id, { turnIndex, clarifyStreak: outcome.nextClarifyStreak, costEstimateUsd: outcome.costEstimateUsd });
     transcript.push({ role: "agent", text: spoken || outcome.spokenText || "" });
   }

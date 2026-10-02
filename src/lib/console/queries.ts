@@ -1,6 +1,7 @@
 import "server-only";
 
 import { ALERT_UNDELIVERED_BANNER_MINUTES, EVAL_RUN_STOPPED_AFTER_MINUTES } from "@/lib/constants";
+import { customerProfile } from "@/lib/console/customers";
 import { queryDb } from "@/lib/db";
 
 // What the console shows (DESIGN §14). Read-only, except the escalation status
@@ -323,9 +324,9 @@ export type TurnDetail = {
 export async function conversationDetail(id: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   const conversation = (
-    await queryDb<ConversationRow & { vapi_call_id: string | null; ended_reason: string | null; escalation_id: string | null; caller_identifier: string | null }>(
+    await queryDb<ConversationRow & { vapi_call_id: string | null; ended_reason: string | null; escalation_id: string | null; caller_identifier: string | null; verification_failures: number }>(
       `select id, created_at::text, channel, turn_count, final_status, summary, agent_cost_estimate_usd::text, vapi_cost_usd::text, verified_customer_id,
-              vapi_call_id, ended_reason, escalation_id, caller_identifier
+              vapi_call_id, ended_reason, escalation_id, caller_identifier, verification_failures
          from support_agent.conversations where id = $1`,
       [id],
     )
@@ -353,12 +354,12 @@ export async function conversationDetail(id: string) {
       `select created_at::text, event_type, summary, source from support_agent.conversation_events where conversation_id = $1 and event_type not in ('vapi_payload_sample', 'mcp_handshake') order by created_at`,
       [id],
     ),
-    queryDb<{ ticket_ref: string; category: string; priority: string; status: string; summary: string }>(
-      `select ticket_ref, category, priority, status, summary from support_agent.support_tickets where conversation_id = $1 order by created_at`,
+    queryDb<{ ticket_ref: string; category: string; priority: string; status: string; summary: string; contact_email: string | null; confirmation_status: string }>(
+      `select ticket_ref, category, priority, status, summary, contact_email, confirmation_status from support_agent.support_tickets where conversation_id = $1 order by created_at`,
       [id],
     ),
-    queryDb<{ id: string; escalation_ref: string; category: string; status: string; booking_status: string; notification_status: string; appointment_time: string | null; reason: string }>(
-      `select id, escalation_ref, category, status, booking_status, notification_status, appointment_time::text, reason from support_agent.escalations where conversation_id = $1 order by created_at`,
+    queryDb<{ id: string; escalation_ref: string; category: string; status: string; booking_status: string; notification_status: string; appointment_time: string | null; reason: string; user_name: string; user_email: string }>(
+      `select id, escalation_ref, category, status, booking_status, notification_status, appointment_time::text, reason, user_name, user_email from support_agent.escalations where conversation_id = $1 order by created_at`,
       [id],
     ),
   ]);
@@ -367,7 +368,9 @@ export async function conversationDetail(id: string) {
     tools: tools.rows.filter((tool) => tool.turn_id === turn.id),
     retrievals: retrievals.rows.filter((retrieval) => retrieval.turn_id === turn.id),
   }));
-  return { conversation, turns: detailed, events: events.rows, tickets: tickets.rows, escalations: escalations.rows };
+  // Who it was with: the verified account in full, for the team (DESIGN §14).
+  const customer = conversation.verified_customer_id ? await customerProfile(conversation.verified_customer_id) : null;
+  return { conversation, customer, turns: detailed, events: events.rows, tickets: tickets.rows, escalations: escalations.rows };
 }
 
 export type GapGroup = { section: string; count: number; examples: string[] };

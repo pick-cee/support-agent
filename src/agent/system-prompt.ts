@@ -1,6 +1,7 @@
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from "@anthropic-ai/claude-agent-sdk";
 
 import { BUSINESS_TIMEZONE, MAX_CLARIFY_STREAK } from "@/lib/constants";
+import type { OfferedSlot } from "@/mcp/types";
 
 // Kept short because it is paid for on every turn (DESIGN §6.5). The static
 // part sits before the boundary so it is cached across turns and calls; the
@@ -16,7 +17,7 @@ Choose one answer_type for every reply
 - lookup_result: a lookup this turn returned found true. Say what it shows in plain words.
 - ticket_created: something needs follow-up (a failed or late payment, a record that contradicts the caller) and create_support_ticket succeeded this turn. Ask once for the reference; if the caller doesn't have it, open the ticket without it. Before opening it, ask where to email them a confirmation and read the address back (collect_details); a verified caller may choose the email on their account. If they want no email, open it without one.
 - escalate: create_escalation succeeded this turn, or the case is already escalated. Confirm a specialist will follow up.
-- collect_details: you are gathering details, one at a time, ending your reply with the question. For a callback: name, then email (read it back), then a preferred time; pass the time to find_callback_slots and offer the times it returns, and once the caller has chosen, call create_escalation. For a ticket: the email for the confirmation (read it back).
+- collect_details: you are gathering details, one at a time, ending your reply with the question. For a callback: name, then email (read it back), then a preferred time; pass the time to find_callback_slots and offer the times it returns, and once the caller has chosen, call create_escalation. Never hold the escalation for a time: if the caller asks you to go ahead or doesn't pick one when asked again, call create_escalation without a slot, and the system says a specialist will email to arrange a time. For a ticket: the email for the confirmation (read it back).
 - decline: nothing approved covers it, or answering would need a guess. Say you can't answer that confidently; offer a specialist or the support options in the RelayPay dashboard.
 - closing: the caller is finished. Thank them briefly; the system adds the goodbye.
 
@@ -57,10 +58,23 @@ export type PromptState = {
   clarifyStreak: number;
   /** Defaults to voice: the call is the product, typing is the alternative. */
   channel?: "voice" | "text";
+  /** Callback times find_callback_slots offered on an earlier turn (FAILURES 37). */
+  offeredSlots?: OfferedSlot[];
 };
 
 function lagosDate(now: Date): string {
   return new Intl.DateTimeFormat("en-GB", { timeZone: BUSINESS_TIMEZONE, weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(now);
+}
+
+// Each turn is a fresh run that cannot see the last turn's slot search, so the
+// times offered are carried here: a "yes" books at once, without a second
+// search that pushed the booking turn past the deadline (FAILURES 37).
+function offeredLines(state: PromptState): string[] {
+  if (state.escalated || !state.offeredSlots?.length) return [];
+  return [
+    "- Callback times already offered on this call. When the caller picks one, call create_escalation with its start_utc and timezone straight away, without searching again:",
+    ...state.offeredSlots.map((slot) => `  - ${slot.speakable}: start_utc ${slot.start_utc}, timezone ${slot.timezone}`),
+  ];
 }
 
 export function systemPrompt(state: PromptState): string[] {
@@ -77,6 +91,7 @@ export function systemPrompt(state: PromptState): string[] {
     `- Caller verified this call: ${state.verified ? "yes" : "no"}.`,
     `- Case escalated to a specialist: ${state.escalated ? "yes, lookups are closed" : "no"}.`,
     clarifyLine,
+    ...offeredLines(state),
   ].join("\n");
   return [STATIC_PROMPT, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, stateBlock];
 }

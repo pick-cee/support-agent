@@ -113,8 +113,9 @@ export async function POST(request: Request): Promise<Response> {
     const text = toSpeech(check.text, new Date()).text;
     const ttftMs = Math.round(performance.now() - received);
     after(async () => {
-      await finishCheapTurn(turn.id, { spokenText: text, answerType: check.answerType, reason: check.reason, ttftMs });
-      await recordTurnOnConversation(conversation.id, { turnIndex, clarifyStreak: conversation.clarify_streak, costEstimateUsd: 0 });
+      if (await finishCheapTurn(turn, { spokenText: text, answerType: check.answerType, reason: check.reason, ttftMs })) {
+        await recordTurnOnConversation(conversation.id, { turnIndex, clarifyStreak: conversation.clarify_streak, costEstimateUsd: 0 });
+      }
       if (check.reason === "budget") {
         await raiseAlert({ type: "budget_exceeded", severity: "critical", fingerprint: "budget_exceeded", message: `Today's estimated agent spend reached $${spentToday.toFixed(2)}; callers hear the busy line.` });
       }
@@ -148,6 +149,7 @@ export async function POST(request: Request): Promise<Response> {
         verified: conversation.verified_customer_id !== null,
         escalated: conversation.escalation_id !== null,
         clarifyStreak: conversation.clarify_streak,
+        offeredSlots: conversation.offered_slots ?? [],
         model: optionalEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL,
         now: new Date(),
         signal: caller.signal,
@@ -173,8 +175,8 @@ export async function POST(request: Request): Promise<Response> {
   after(async () => {
     const outcome = await outcomePromise;
     try {
-      await finishTurn(turn.id, outcome);
-      await recordTurnOnConversation(conversation.id, { turnIndex, clarifyStreak: outcome.nextClarifyStreak, costEstimateUsd: outcome.costEstimateUsd });
+      const current = await finishTurn(turn, outcome);
+      await recordTurnOnConversation(conversation.id, { turnIndex, clarifyStreak: current ? outcome.nextClarifyStreak : null, costEstimateUsd: outcome.costEstimateUsd });
     } catch (error) {
       console.error(JSON.stringify({ event: "turn_not_recorded", turn_id: turn.id, error: error instanceof Error ? error.message : String(error) }));
     }

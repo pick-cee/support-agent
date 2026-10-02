@@ -3,13 +3,19 @@ import "server-only";
 import { after } from "next/server";
 
 import { raiseAlert } from "@/lib/alerts";
+import { bearerMatches } from "@/lib/auth";
+import { requireEnv } from "@/lib/env";
 
 // Phase 0 confirms the path Vapi calls under model.url (DESIGN §12.2). If it
 // is not /chat/completions, the call lands here instead of in silence: the
-// alert names the path Vapi actually used.
+// alert names the path Vapi actually used. Only a request carrying Vapi's own
+// credential raises it: anyone on the internet can request /api/vapi/anything,
+// and a path scanner would otherwise email the team a critical alert per path.
 export const runtime = "nodejs";
 
 async function unexpected(request: Request): Promise<Response> {
+  const notFound = Response.json({ error: "Not found" }, { status: 404 });
+  if (!bearerMatches(request.headers.get("authorization"), requireEnv("VAPI_LLM_TOKEN"))) return notFound;
   const path = new URL(request.url).pathname;
   after(() =>
     raiseAlert({
@@ -20,7 +26,7 @@ async function unexpected(request: Request): Promise<Response> {
       context: { path, method: request.method },
     }),
   );
-  return Response.json({ error: "Not found" }, { status: 404 });
+  return notFound;
 }
 
 export { unexpected as GET, unexpected as POST };

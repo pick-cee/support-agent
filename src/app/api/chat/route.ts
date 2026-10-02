@@ -61,7 +61,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const now = new Date();
   let conversation: TextConversationRow;
-  let turn: { id: string; turn_index: number } | null;
+  let turn: { id: string; turn_index: number; attempt: number } | null;
   let history: { user_text: string; spoken_text: string | null }[];
   let spentToday: number;
   try {
@@ -92,7 +92,7 @@ export async function POST(request: Request): Promise<Response> {
   if (check.action === "reply") {
     const typedText = check.reason === "max_turns" ? TYPED.tooManyTurns : check.reason === "empty" ? TYPED.didNotCatch : check.reason === "goodbye" ? `${SPOKEN.quickGoodbye} ${TYPED.goodbye}` : check.text;
     const text = toText(typedText, now).text;
-    await finishCheapTurn(turn.id, { spokenText: text, answerType: check.answerType, reason: check.reason, ttftMs: 0 });
+    await finishCheapTurn(turn, { spokenText: text, answerType: check.answerType, reason: check.reason, ttftMs: 0 });
     await recordTurnOnConversation(conversation.id, { turnIndex: turn.turn_index, clarifyStreak: conversation.clarify_streak, costEstimateUsd: 0 });
     if (check.reason === "budget") {
       after(() => raiseAlert({ type: "budget_exceeded", severity: "critical", fingerprint: "budget_exceeded", message: `Today's estimated agent spend reached $${spentToday.toFixed(2)}; customers get the busy line.` }));
@@ -115,6 +115,7 @@ export async function POST(request: Request): Promise<Response> {
     verified: conversation.verified_customer_id !== null,
     escalated: conversation.escalation_id !== null,
     clarifyStreak: conversation.clarify_streak,
+    offeredSlots: conversation.offered_slots ?? [],
     model: optionalEnv("AGENT_MODEL") ?? DEFAULT_AGENT_MODEL,
     now,
     signal: request.signal,
@@ -126,8 +127,8 @@ export async function POST(request: Request): Promise<Response> {
 
   // Recorded before answering, so the next message's transcript includes this one.
   try {
-    await finishTurn(turn.id, outcome);
-    await recordTurnOnConversation(conversation.id, { turnIndex: turn.turn_index, clarifyStreak: outcome.nextClarifyStreak, costEstimateUsd: outcome.costEstimateUsd });
+    const current = await finishTurn(turn, outcome);
+    await recordTurnOnConversation(conversation.id, { turnIndex: turn.turn_index, clarifyStreak: current ? outcome.nextClarifyStreak : null, costEstimateUsd: outcome.costEstimateUsd });
   } catch (error) {
     console.error(JSON.stringify({ event: "turn_not_recorded", turn_id: turn.id, error: error instanceof Error ? error.message : String(error) }));
   }

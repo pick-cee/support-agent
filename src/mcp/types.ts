@@ -17,12 +17,17 @@ export type ToolContext = {
   clock: Clock;
 };
 
+/** A callback time find_callback_slots offered, kept on the conversation (FAILURES 37). */
+export type OfferedSlot = { start_utc: string; speakable: string; timezone: string };
+
 export type ConversationState = {
   id: string;
   verifiedCustomerId: string | null;
   escalated: boolean;
   /** Failed identity checks this conversation; at VERIFY_MAX_FAILURES lookups close (DESIGN §7.2). */
   verificationFailures: number;
+  /** The callback times last offered on this conversation; empty before any search. */
+  offeredSlots: OfferedSlot[];
 };
 
 export type CustomerRecord = {
@@ -196,6 +201,8 @@ export interface Repository {
   setVerifiedCustomer(conversationId: string, customerId: string): Promise<void>;
   /** Counts one failed identity check and returns the conversation's total. */
   recordVerificationFailure(conversationId: string): Promise<number>;
+  /** Replaces the callback times offered on the conversation with these. */
+  setOfferedSlots(conversationId: string, slots: OfferedSlot[]): Promise<void>;
 
   /** Every customer that matches at least one identifier; code decides which, if any, two identifiers agree on. */
   findCustomerCandidates(identifiers: { customerId: string | null; email: string | null; companyKey: string | null; firstName: string | null }): Promise<CustomerRecord[]>;

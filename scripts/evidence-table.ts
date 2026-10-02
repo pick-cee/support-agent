@@ -48,7 +48,7 @@ const ROWS: { keys: string[]; testCase: string; notes: string }[] = [
     keys: ["escalation"],
     testCase: "Human escalation",
     notes:
-      "Failed at first: reading the email back (\"efua at accrastack dot example. Is that right?\") was blocked because the email check read the sentence end as part of the address (FAILURES 18); the pattern was fixed. Still open: the turn that books the callback is the slowest and can pass the 14 s limit (FAILURES 36, 37). When it does, the escalation is already made and the caller hears what code wrote from it, not silence or a guess; the wait after the limit was cut from about 7 s to 1 s. Real bookings and handoff emails were made on live calls: E-2004 on 30 September and E-2014 on 2 October, the second after the callback calendar was recreated.",
+      "Failed at first: reading the email back (\"efua at accrastack dot example. Is that right?\") was blocked because the email check read the sentence end as part of the address (FAILURES 18); the pattern was fixed. Then the turn that books the callback passed the 14 s limit, because each turn starts fresh and searched the calendar again for the time the caller had just chosen (FAILURES 37). Changed on 2026-10-02: the times offered are kept on the conversation, so a \"yes\" books at once, and only an offered time can be booked; the booking turn went from 14 to 15 s to 9 to 10 s in the eval. If the limit is still passed, the escalation is already made and the caller hears what code wrote from it, not silence or a guess. Real bookings and handoff emails were made on live calls: E-2004 on 30 September and E-2014 on 2 October, the second after the callback calendar was recreated.",
   },
   {
     keys: ["unsupported"],

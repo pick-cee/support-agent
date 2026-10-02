@@ -54,6 +54,8 @@ export type GateInput = {
   clarifyStreak: number;
   /** What code will speak this turn, so the model's own version of it goes. */
   covers?: CodeSentences["covers"];
+  /** The speakable callback times offered on this conversation: code wrote them, so repeating one is evidence-backed. */
+  offeredSlots?: string[];
 };
 
 export type GateVerdict = {
@@ -356,7 +358,7 @@ function fallbackFor(answer: Answer, failed: GateResult[]): { text: string; answ
 export function runGates(given: GateInput): GateVerdict {
   const { grounding, downgraded } = effectiveGrounding(given.answer, given.toolCalls);
   const input: GateInput = grounding ? { ...given, answer: { ...given.answer, grounding } } : given;
-  const evidenceTexts = [...input.toolCalls.filter((call) => call.result).map((call) => JSON.stringify(call.result)), ...input.callerTexts];
+  const evidenceTexts = [...input.toolCalls.filter((call) => call.result).map((call) => JSON.stringify(call.result)), ...input.callerTexts, ...(input.offeredSlots ?? [])];
   const { answer } = input;
   const asksQuestion = answer.answer_type === "clarify" || answer.answer_type === "collect_details";
   const evidence = evidenceGate(input);

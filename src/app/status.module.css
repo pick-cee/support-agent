@@ -1,0 +1,87 @@
+/* Not found and error pages: one calm card on the page background, the logo
+   above it, and a way forward. */
+
+.page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--background);
+}
+
+.card {
+  width: 100%;
+  max-width: 440px;
+  padding: 32px 28px 28px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.logo {
+  display: block;
+  margin: 0 auto 24px;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  color: var(--brand-primary);
+}
+
+.body {
+  margin: 8px 0 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.primary,
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.primary {
+  border: 0;
+  background: var(--brand-primary);
+  color: #ffffff;
+}
+
+.primary:hover {
+  background: var(--brand-primary-hover);
+  color: #ffffff;
+}
+
+.secondary {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Inside the console's frame: no full-height page of its own. */
+.inline {
+  display: grid;
+  place-items: center;
+  padding: 48px 0;
+}

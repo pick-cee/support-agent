@@ -13,6 +13,7 @@ import type {
   EscalationInput,
   EscalationRecord,
   EventLog,
+  OfferedSlot,
   PayoutRecord,
   Repository,
   RetrievalLog,
@@ -99,7 +100,7 @@ export function createMemoryRepository(root: string = process.cwd()): MemoryRepo
     ]),
   );
   const kb = chunkKnowledgeBase(readFileSync(path.join(root, KB_SOURCE_PATH), "utf8"));
-  const conversations = new Map<string, { verifiedCustomerId: string | null; escalationId: string | null; verificationFailures: number }>();
+  const conversations = new Map<string, { verifiedCustomerId: string | null; escalationId: string | null; verificationFailures: number; offeredSlots: OfferedSlot[] }>();
   const tickets: Ticket[] = [];
   const escalations: EscalationRecord[] = [];
   const jobs: Job[] = [];
@@ -136,16 +137,20 @@ export function createMemoryRepository(root: string = process.cwd()): MemoryRepo
 
     async conversationState(id) {
       const conversation = conversations.get(id);
-      return conversation ? { id, verifiedCustomerId: conversation.verifiedCustomerId, escalated: conversation.escalationId !== null, verificationFailures: conversation.verificationFailures } : null;
+      return conversation ? { id, verifiedCustomerId: conversation.verifiedCustomerId, escalated: conversation.escalationId !== null, verificationFailures: conversation.verificationFailures, offeredSlots: conversation.offeredSlots } : null;
     },
     async createConversation() {
       const id = randomUUID();
-      conversations.set(id, { verifiedCustomerId: null, escalationId: null, verificationFailures: 0 });
+      conversations.set(id, { verifiedCustomerId: null, escalationId: null, verificationFailures: 0, offeredSlots: [] });
       return id;
     },
     async setVerifiedCustomer(id, customerId) {
       const conversation = conversations.get(id);
       if (conversation) conversation.verifiedCustomerId = customerId;
+    },
+    async setOfferedSlots(id, slots) {
+      const conversation = conversations.get(id);
+      if (conversation) conversation.offeredSlots = slots;
     },
     async recordVerificationFailure(id) {
       const conversation = conversations.get(id);

@@ -14,6 +14,7 @@ import type {
   EventLog,
   KbHit,
   KbSearchResult,
+  OfferedSlot,
   PayoutRecord,
   Repository,
   RetrievalLog,
@@ -56,13 +57,13 @@ export const supabaseRepository: Repository = {
   backend: "supabase",
 
   async conversationState(conversationId) {
-    const result = await queryDb<{ id: string; verified_customer_id: string | null; escalation_id: string | null; verification_failures: number }>(
-      "select id, verified_customer_id, escalation_id, verification_failures from support_agent.conversations where id = $1",
+    const result = await queryDb<{ id: string; verified_customer_id: string | null; escalation_id: string | null; verification_failures: number; offered_slots: OfferedSlot[] | null }>(
+      "select id, verified_customer_id, escalation_id, verification_failures, offered_slots from support_agent.conversations where id = $1",
       [conversationId],
     );
     const row = result.rows[0];
     return row
-      ? ({ id: row.id, verifiedCustomerId: row.verified_customer_id, escalated: row.escalation_id !== null, verificationFailures: row.verification_failures } satisfies ConversationState)
+      ? ({ id: row.id, verifiedCustomerId: row.verified_customer_id, escalated: row.escalation_id !== null, verificationFailures: row.verification_failures, offeredSlots: row.offered_slots ?? [] } satisfies ConversationState)
       : null;
   },
 
@@ -82,6 +83,10 @@ export const supabaseRepository: Repository = {
 
   async setVerifiedCustomer(conversationId, customerId) {
     await queryDb(`update support_agent.conversations set verified_customer_id = $2, updated_at = now() where id = $1`, [conversationId, customerId]);
+  },
+
+  async setOfferedSlots(conversationId, slots) {
+    await queryDb(`update support_agent.conversations set offered_slots = $2, updated_at = now() where id = $1`, [conversationId, JSON.stringify(slots)]);
   },
 
   async findCustomerCandidates(ids) {

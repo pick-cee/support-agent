@@ -2509,6 +2509,11 @@ a.listItem:hover .listTitle {
   box-shadow: var(--shadow-sm);
 }
 
+/* The customer card sits straight after the summary; the article's own rhythm has no gap for it. */
+.summaryCard + .summaryCard {
+  margin-top: 16px;
+}
+
 .summaryTop {
   display: grid;
   gap: 12px;
@@ -2874,4 +2879,238 @@ a.listItem:hover .listTitle {
 /* Figures in a row of four inside a card: a step smaller than the headline numbers. */
 .statValue[data-size="small"]:not([data-empty="true"]) {
   font-size: var(--font-size-xl);
+}
+
+/* --- Customers (DESIGN §14) --------------------------------------------------- */
+
+/* Who a conversation was with: the person, their state, and a way to their history. */
+.customerHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.customerWho {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.customerName {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.customerName .muted {
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+}
+
+/* The internal support note: the team's own words, set apart. */
+.noteBox {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+}
+
+.noteBox .summaryLabel {
+  margin: 0;
+}
+
+.noteBox p:last-child {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text);
+}
+
+.summaryNoteSub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--text-subtle);
+}
+
+/* The customers list: one row per customer. */
+.customerList {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.customerRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1.4fr) minmax(0, 1.1fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 14px 4px;
+  border-top: 1px solid var(--border);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color 160ms ease;
+}
+
+.customerList li:first-child .customerRow {
+  border-top: 0;
+}
+
+.customerRow:hover {
+  background: var(--surface-muted);
+}
+
+.customerCell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text);
+}
+
+.customerCell .muted {
+  font-size: var(--font-size-xs);
+}
+
+/* "Waiting for business verification" ran into the next column on one line. */
+.customerCell .statusText {
+  align-items: flex-start;
+  white-space: normal;
+}
+
+.customerCell .statusDot {
+  flex: none;
+  margin-top: 0.45em;
+}
+
+.customerPerson {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* On a phone the status goes under the name, in line with it past the avatar: side by side they overlapped. */
+@media (max-width: 760px) {
+  .customerRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .customerRow > .customerCell:nth-child(2) {
+    padding-left: 48px;
+  }
+
+  .customerRow > .customerCell:nth-child(3),
+  .customerRow > .customerCell:nth-child(4) {
+    display: none;
+  }
+}
+
+/* A customer's history: compact rows inside cards. */
+.historyList {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.historyItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  color: inherit;
+  text-decoration: none;
+}
+
+.historyList li:first-child .historyItem {
+  border-top: 0;
+  padding-top: 0;
+}
+
+a.historyItem:hover .historyTitle {
+  color: var(--brand-primary);
+}
+
+.historyBody {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.historyTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.historyMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-subtle);
+}
+
+.historyWhen {
+  flex: none;
+  font-size: var(--font-size-xs);
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+
+.historyAmount {
+  flex: none;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A way back that shows on every screen size (the inbox's own shows only on a phone). */
+.detailBackAlways {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.detailBackAlways svg {
+  transform: rotate(180deg);
+}
+
+.customerTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: var(--font-size-xl);
+  letter-spacing: -0.015em;
+  color: var(--brand-primary);
+}
+
+.customerTitle .muted {
+  font-size: var(--font-size-md);
+  font-weight: 400;
+  letter-spacing: 0;
 }

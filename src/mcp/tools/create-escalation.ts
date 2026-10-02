@@ -40,7 +40,7 @@ export const createEscalation: ToolDefinition<Input> = {
   description:
     "Escalate to human support: account restrictions, compliance or verification concerns, disputes, refunds, cancellations, a frustrated caller, or anything needing judgment. " +
     "Collect the caller's name, an email (read it back first, or use_email_on_file for a verified caller who prefers not to spell it) and a preferred time, " +
-    "then pass the start_utc of the slot the caller chose from find_callback_slots. This records the escalation, books the call and notifies the support team. " +
+    "then pass the start_utc of the slot the caller chose: from find_callback_slots this turn, or from the callback times offered listed in the call state, without searching again. This records the escalation, books the call and notifies the support team. " +
     "The system tells the caller the booked time or the email follow-up; do not state them yourself. After this, lookups are closed for the call.",
   wireInput: lenientInput({
     ticket_id: { type: "string", description: "An existing ticket from this call, if one was opened." },
@@ -93,14 +93,22 @@ export const createEscalation: ToolDefinition<Input> = {
 
     const now = context.clock();
     let requestedStart: Date | null = null;
+    let offeredZone: string | null = null;
     if (input.slot_start_utc) {
       const start = new Date(input.slot_start_utc);
       if (Number.isNaN(start.getTime()) || start.getTime() < now.getTime() + MIN_LEAD_MS || start.getTime() > now.getTime() + BOOKING_HORIZON_DAYS * 86_400_000) {
         return invalid("slot_start_utc must be one of the start_utc values find_callback_slots offered in this call. Offer those times again.", "invalid_input: slot not bookable");
       }
+      // Only a time this call was offered: never one the model made up.
+      const offered = state?.offeredSlots ?? [];
+      const match = offered.find((slot) => new Date(slot.start_utc).getTime() === start.getTime());
+      if (offered.length && !match) {
+        return invalid("That time was not one of the callback times offered on this call. Offer the times in the call state again, or search for a new time.", "invalid_input: slot not offered");
+      }
+      offeredZone = match?.timezone ?? null;
       requestedStart = start;
     }
-    const timezone = input.timezone && isValidZone(input.timezone) ? input.timezone : BUSINESS_TIMEZONE;
+    const timezone = input.timezone && isValidZone(input.timezone) ? input.timezone : offeredZone && isValidZone(offeredZone) ? offeredZone : BUSINESS_TIMEZONE;
     const conversationKey = context.conversationId ?? `direct:${email}`;
 
     const { escalation, created, jobIds } = await repository.createEscalation({

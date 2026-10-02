@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createMcpHttp } from "./http";
 import { createMemoryRepository, memoryServices, type MemoryRepository } from "./memory-repository";
+import type { CalendarService } from "./types";
 
 // Contract tests (DESIGN §18.2): every tool over real MCP, on the memory
 // backend, through the same HTTP handler the route uses and through the stdio
@@ -26,10 +27,10 @@ function withHost(url: string | URL, init?: RequestInit): Request {
   return new Request(url, { ...init, headers });
 }
 
-async function httpClient(repository: MemoryRepository, conversationId: string | null, token = TOKEN): Promise<Client> {
+async function httpClient(repository: MemoryRepository, conversationId: string | null, token = TOKEN, calendar?: CalendarService): Promise<Client> {
   const handle = createMcpHttp({
     repository,
-    services: () => memoryServices(repository),
+    services: () => ({ ...memoryServices(repository), ...(calendar ? { calendar } : {}) }),
     token: () => TOKEN,
     allowedHostnames: () => ["localhost"],
     clock: () => NOW,
@@ -227,6 +228,49 @@ describe("MCP over HTTP, memory backend", () => {
   it("create_escalation rejects a slot that is not in the booking window", async () => {
     const { data } = await call(client, "create_escalation", { user_name: "Efua", user_email: "efua@accrastack.example", category: "account", reason: "Restricted.", slot_start_utc: "2020-01-01T10:00:00Z" });
     expect(data).toMatchObject({ error_code: "invalid_input" });
+  });
+
+  // FAILURES 37: the caller says yes on the next turn, a fresh agent run that no
+  // longer has the search result, so the offered times live on the conversation.
+  it("find_callback_slots keeps the times it offered, and create_escalation books only one of them, in its zone", async () => {
+    const free = ["2026-09-30T13:00:00Z", "2026-09-30T14:00:00Z", "2026-10-01T09:00:00Z"].map((start) => ({ start: new Date(start) }));
+    const withCalendar = await httpClient(repository, conversationId, TOKEN, { slots: async () => free });
+
+    const asked = await call(withCalendar, "find_callback_slots", { preferred_time_text: "tomorrow at 2pm" });
+    expect(asked.data).toMatchObject({ requested_available: true, alternatives: [] });
+    expect((await repository.conversationState(conversationId))?.offeredSlots).toEqual([
+      { start_utc: "2026-09-30T13:00:00.000Z", speakable: "Wednesday 30 September at 2 PM Lagos time", timezone: "Africa/Lagos" },
+    ]);
+
+    await call(withCalendar, "find_callback_slots", { preferred_time_text: "tomorrow at 1pm", timezone_hint: "Nairobi" });
+    const offered = (await repository.conversationState(conversationId))!.offeredSlots;
+    expect(offered.map((slot) => slot.start_utc)).toEqual(["2026-09-30T13:00:00.000Z", "2026-09-30T14:00:00.000Z"]);
+    expect(offered.every((slot) => slot.timezone === "Africa/Nairobi")).toBe(true);
+
+    const base = { user_name: "Efua", user_email: "efua@accrastack.example", category: "account", reason: "Restricted." };
+    // Free on the calendar, but never offered: not booked.
+    const madeUp = await call(withCalendar, "create_escalation", { ...base, slot_start_utc: "2026-10-01T09:00:00Z" });
+    expect(madeUp.data).toMatchObject({ error_code: "invalid_input" });
+    expect(repository.escalations).toHaveLength(0);
+
+    const chosen = await call(withCalendar, "create_escalation", { ...base, slot_start_utc: "2026-09-30T14:00:00Z" });
+    expect(chosen.data).toMatchObject({ created: true, timezone: "Africa/Nairobi" });
+    expect(repository.escalations[0]).toMatchObject({ requested_start: "2026-09-30T14:00:00.000Z", timezone: "Africa/Nairobi" });
+  });
+
+  it("find_callback_slots looks a week ahead, and a search with nothing free clears the earlier offer", async () => {
+    let asked: { startUtc: Date; endUtc: Date } | null = null;
+    const busy = await httpClient(repository, conversationId, TOKEN, {
+      slots: async (range) => {
+        asked = range;
+        return [];
+      },
+    });
+    await repository.setOfferedSlots(conversationId, [{ start_utc: "2026-09-30T13:00:00.000Z", speakable: "Wednesday 30 September at 2 PM Lagos time", timezone: "Africa/Lagos" }]);
+    const { data } = await call(busy, "find_callback_slots", { preferred_time_text: "Friday at 10am" });
+    expect(data).toMatchObject({ requested_available: false, alternatives: [] });
+    expect(asked!.endUtc.getTime() - asked!.startUtc.getTime()).toBe(7 * 86_400_000);
+    expect((await repository.conversationState(conversationId))?.offeredSlots).toEqual([]);
   });
 
   it("log_conversation_event logs, and rejects an unknown event type", async () => {

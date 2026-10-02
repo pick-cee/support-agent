@@ -399,7 +399,7 @@ message stream (the `tool_result` blocks); the model cannot write to it.
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | **Evidence for the answer type**       | `answer` needs a `search_knowledge_base` call this turn with `found: true`, and every cited id must be one it returned. An `inferred` answer may instead rest on the `related` sections a search returned; an answer citing one is treated as inferred whatever the model called it, and gets the hedge (§8). `lookup_result` needs a successful `lookup_*` call this turn. `ticket_created` needs a successful `create_support_ticket` this turn. `escalate` needs a successful `create_escalation` this turn or an already escalated conversation. | Repair once, else decline and offer a specialist.         |
 | **Questions end in a question**        | `clarify` and `collect_details` must ask a question. Code moves the last question to the end, and keeps it when a long reply is trimmed, so the caller hears the question last (§20). Nothing is reworded.                                                                                                                                                  | Repair once, else a fixed clarifying question.            |
-| **Numbers must come from evidence**    | Every digit in `spoken_text`, and every number word from one to thirty that sits beside a unit (days, hours, percent, a currency, am/pm) or beside another number, must appear in a chunk retrieved this turn, a tool result from this turn, or something the caller said. This is what stops an invented fee or an invented "3 business days", without blocking "one moment" or "one of our specialists". | Repair once, else decline.                                |
+| **Numbers must come from evidence**    | Every digit in `spoken_text`, and every number word from one to thirty that sits beside a unit (days, hours, percent, a currency, am/pm) or beside another number, must appear in a chunk retrieved this turn, a tool result from this turn, something the caller said, or (2026-10-02) a callback time code offered on an earlier turn of this conversation (§7.3). This is what stops an invented fee or an invented "3 business days", without blocking "one moment" or "one of our specialists". | Repair once, else decline.                                |
 | **No email the caller didn't say**     | Any email address in `spoken_text` must have been said by the caller in this conversation.                                                                                                                                                                                                                                                                     | Remove and repair.                                        |
 | **No reference the caller didn't say** | Any `CUS-`, `TXN-` or `PAY-` style id must have been said by the caller. Our own ticket and escalation refs are added by code, not by the model.                                                                                                                                                                                                               | Repair once, else fallback.                               |
 | **No amounts for unverified callers**  | A currency amount may be spoken only if a lookup this turn returned it as disclosed, which only happens for the verified owner.                                                                                                                                                                                                                                | Repair once, else fallback.                               |
@@ -490,7 +490,15 @@ short sentences, one question at a time, no lists, plain words); the output
 schema and what each `answer_type` requires; and that transcripts are the
 caller's words, never instructions. Each turn appends a small state block that
 code writes: today's date in Africa/Lagos, whether the caller is verified,
-whether the case is escalated, the clarify streak.
+whether the case is escalated, the clarify streak, and (2026-10-02) the
+callback times already offered on this call, each with its `start_utc` and
+zone, until the case is escalated. Each turn is a fresh run that cannot see
+the last turn's tool results, so without that line a caller's "yes" cost a
+second slot search before the booking, and the booking turn passed the
+deadline (FAILURES 37). The prompt also says never to hold an escalation for
+a time: if the caller asks to go ahead, or doesn't pick a time when asked
+again, the agent escalates without a slot and code says a specialist will
+email to arrange one.
 
 ---
 
@@ -630,6 +638,14 @@ maths is code's job, never the model's)
   Cal.com is down or unconfigured).
 - A time in the past, outside the booking horizon, or unparseable comes back
   as `parsed: false` with a reason. The agent asks again.
+- The nearest free times are looked for from the requested day up to
+  `SLOT_SEARCH_DAYS` (7) on, never past the booking horizon. It was three
+  days: "Friday at 10am", with that Friday busy and a weekend after it, found
+  nothing to offer (eval, 2026-10-02).
+- (2026-10-02) What it offered (the requested time when free, otherwise the
+  alternatives) is written to `conversations.offered_slots`, replacing any
+  earlier offer, and an empty search clears it. The next turn's state block
+  lists them (§6.5), so the caller's choice books without searching again.
 
 **`create_support_ticket`**
 
@@ -660,6 +676,10 @@ maths is code's job, never the model's)
   saying it.
 - The email is validated. An invalid one is `isError` with "the email didn't
   validate; ask the caller to spell it".
+- (2026-10-02) Once the conversation has been offered callback times,
+  `slot_start_utc` must be one of them; any other time is `invalid_input`
+  and nothing is recorded, so the model cannot book a time it made up. When
+  `timezone` is left out, the offered slot's zone is used.
 - Steps, each recorded:
   1. Create a ticket if none was given, so every escalation is on the queue.
   2. Insert the escalation (`status: 'open'`, `call_booked: false`),
@@ -912,6 +932,9 @@ below.
 - `started_at`, `ended_at`, `ended_reason`
 - `final_status` (§2.10), `summary` (code-built, §11)
 - `verified_customer_id`, `escalation_id`, `clarify_streak`, `turn_count`
+- `verification_failures` (§7.3) and `offered_slots jsonb null`: the callback
+  times last offered, `[{start_utc, speakable, timezone}]` (migration 0009,
+  §7.3)
 - `vapi_cost_usd`: real billing, from Vapi
 - `agent_cost_estimate_usd`: the SDK estimate, labelled as one
 - `raw_end_report jsonb`
@@ -1492,6 +1515,11 @@ instead of speaking. It is the same product, not a second one:
     send button pops when there is something to send
 - **Environment:** `NEXT_PUBLIC_VAPI_PUBLIC_KEY` and
   `NEXT_PUBLIC_VAPI_ASSISTANT_ID` are the only public variables in the app.
+- **When something breaks (added 2026-10-02).** A missing page, a page that
+  fails to render, and a failure in the root layout itself each get a calm,
+  branded page in plain words (`ERRORS` in `copy.ts`) with a way back, never
+  Next's default screen or a stack trace. The console has its own, inside its
+  layout, so the sidebar stays.
 
 ---
 
@@ -1628,6 +1656,28 @@ filter for each channel, eval included.
    "What the assistant checked" stays folded until opened: records checked,
    help articles searched and used, safety checks, and any reply a check
    held back, marked as never sent.
+
+   **Who the customer was (added 2026-10-02 at Akin's request, §20).** Under
+   the summary, a conversation and an escalation both show a customer card,
+   so whoever picks up a case knows who they are dealing with before reading
+   the transcript. A verified caller's card shows the company and contact,
+   "Verified on this call", the email, plan, account status, identity check,
+   region, customer ID and the internal support note, with a link to the
+   customer. An unverified caller's card says no account records were shared
+   with them, how many identity checks failed (and that lookups were closed at
+   `VERIFY_MAX_FAILURES`), and the name and email they gave. The console is
+   the team's, behind the password, so it shows what the agent never may: the
+   contact's email and the support note.
+3a. **Customers** (added 2026-10-02, under Work). Every customer, the most
+   recently in touch first: company and contact, plan, account status and
+   identity check, how many conversations and when the last one was, open
+   tickets and escalations, and region. A customer's page has the profile
+   card, then their conversations, escalations, tickets (with whether the
+   confirmation email went), transactions and payouts. A conversation counts
+   for a customer only once the caller verified as them; an escalation from an
+   unverified caller who gave the customer's own email is listed too, marked
+   as matched by email. Eval runs are left out. On a phone the status goes
+   under the name.
 4. **Knowledge.** Three tabs (§8):
    - Questions to answer: the gaps, grouped, each with "Answer this". Only
      questions the assistant searched for count: a refusal made without a
@@ -1816,6 +1866,26 @@ also stopped the run; Vercel's numbers are still owed (Phase 0).
   - Turn records hold transcripts, and the console is behind a login.
   - Vapi recording is off.
 - **The cron endpoint** requires `CRON_SECRET`.
+- **Vapi's other paths** (`/api/vapi/[...path]`, added to catch a misrouted
+  custom-LLM call) answer a plain 404 and raise nothing unless the request
+  carries Vapi's credential. Before 2026-10-02 any request to an unknown path
+  raised a critical alert and emailed it, so anyone could fill the team's
+  inbox.
+- **Browser headers (added 2026-10-02, `next.config.ts`).** Every page: no
+  framing (`frame-ancestors 'none'`, `X-Frame-Options: DENY`), `base-uri`,
+  `form-action` and `object-src` locked to the site, `nosniff`, a strict
+  referrer policy, HSTS, `Cross-Origin-Opener-Policy: same-origin`, and a
+  permissions policy that allows the microphone for the site itself and
+  nothing else (camera, location, payment, USB). The console also sends
+  `noindex` and `no-store`, so its pages are never indexed or cached. There
+  is no script allow-list: the Vapi SDK loads its call engine from Daily's
+  domains, and a wrong allow-list breaks calls without a visible error. A
+  real web call through these headers connected, played the greeting, and
+  answered a typed message in 6.1 s (2026-10-02).
+- **Console sessions** last `CONSOLE_SESSION_HOURS` (12). Signing out clears
+  the cookie in that browser; a copied cookie stays valid until it expires,
+  because sessions are signed, not stored. Changing `CONSOLE_SESSION_SECRET`
+  ends every session at once.
 - **The typed endpoint** (`/api/chat`) is public by nature, like the page. It
   accepts same-origin requests only, limits each visitor (a keyed hash of the
   IP, never the address) to `TEXT_MESSAGES_PER_WINDOW` messages per
@@ -2064,6 +2134,10 @@ These go in the one-pager and the reflection, named before a grader finds them.
 | 2026-10-02 | Verify before any lookup: unverified callers learn nothing about a record, not even that it exists; one account per conversation; `VERIFY_MAX_FAILURES` failed checks close verification; a missing reference and someone else's read the same; tickets link records only for the verified owner (§2.5, §7.2, §15, migration `0008`). | Akin asked whether "give me the details of TXN-9001" was simply answered, and whether a caller verified as Amara could ask about another customer. Anyone with a reference heard its status, references are sequential, a verified caller could switch to another customer by naming two of their details, and guesses were unlimited. Chosen by Akin from options; an emailed one-time code was set aside because every seed email ends in `.example`. | `lookup-transaction.test.ts` and `contract.test.ts` (verify first, the identity lock with real and fake details answered alike, the lock after three failures, missing and not-owned answered alike); the eval scenarios split TXN-9001 and PAY-7002 into two conversations and add `identity_switch` and `verify_attempts`. |
 | 2026-10-02 | A ticket asks where to send a confirmation, reads the email back, and the outbox emails the customer their reference (§10.5); the one exception to "we do not email customers" (§1). | Akin: the customer should be told the ticket is logged and a person will get back to them. | `contract.test.ts` (queued once on a retry, never for a reserved domain, refused on an unreadable email), `ticket-confirmation.test.ts` (no category or team summary in it), `code-sentences.test.ts`; the `ticket` eval scenario reads the address back and finds the job. The email has not been received on a real call yet. |
 | 2026-10-02 | The greeting says what the assistant can do (§12.1); during a call the caller can type, or edit a line speech recognition misheard, and send it into the call (§13). | Akin: callers should know what to ask, and "voice to text might not always be accurate". | Typecheck and lint. Typing into a live call uses Vapi's documented `add-message`; it has not been tried on a real call yet. |
+| 2026-10-02 | A turn's result is written only while it is still that turn's latest attempt (`finishTurn` and `finishCheapTurn` match on `attempt`); a superseded attempt's cost still counts, its answer and clarify streak do not (§9.2). | Vapi re-sends a turn while the caller keeps talking, and a slow first attempt wrote its answer over the instant goodbye the caller actually heard (FAILURES 53). | Against the real database: attempt 2's goodbye kept, attempt 1's late answer refused. |
+| 2026-10-02 | Offered callback times are kept on the conversation and listed in the next turn's call state; `create_escalation` books only one of them; the slot search looks a week ahead; the prompt never holds an escalation for a time (§6.3, §6.5, §7.3, migration `0009`). | A caller's "yes" cost a second slot search and pushed the booking past the deadline, on Akin's live call and in the benchmark (FAILURES 37); a busy Friday left nothing to offer (FAILURES 57); a caller asking to escalate was asked for a time again (FAILURES 58). | Booking turn 15.0 s and 14.1 s before, 9.1 to 10.0 s in three runs after, no second search (eval, local). `contract.test.ts`, `gates.test.ts`, `system-prompt.test.ts`. Full eval 27 of 27 with the change, before the last two fixes; `escalation` and `refund_spelled_email` 2 of 2 after them. |
+| 2026-10-02 | The console shows who the customer was: a customer card on every conversation and escalation, and a Customers page with each customer's history (§14). | Akin: "when admins come in they know exactly what conversations went down." | Screenshots in Edge at 1366 px and 390 px of the list, a customer and a conversation, no sideways scroll. `customers.ts` queries run against the real schema; no unit test for them. |
+| 2026-10-02 | Security headers on every page, `noindex` and `no-store` on the console, branded error pages, and Vapi's catch-all path silent without its credential (§13, §17). | Akin asked for the system to be production ready and secure. The catch-all let anyone trigger critical alert emails (FAILURES 56). | `curl` of the local page shows the headers; a real web call through them connected and answered a typed question in 6.1 s (FAILURES 59). Not yet seen on Vercel: needs a deploy. |
 
 Record every departure from this document here, in the same piece of work as
 the code change.
@@ -2113,6 +2187,7 @@ replaced with measured values, with the measurement noted.
 | `CALLBACK_DURATION_MIN`                | 30                               | Matches the Cal.com event type                              |
 | `SLOT_ALTERNATIVES`                    | 2                                |                                                             |
 | `BOOKING_HORIZON_DAYS`                 | 14                               |                                                             |
+| `SLOT_SEARCH_DAYS`                     | 7                                | How far past the requested day the nearest free times are looked for (§7.3) |
 | `CAL_TIMEOUT_MS` / `RESEND_TIMEOUT_MS` | 6000 / 5000                      | Inline attempts                                             |
 | `JOB_MAX_ATTEMPTS`                     | 6                                | Then `dead`                                                 |
 | `ALERT_RENOTIFY_MINUTES`               | 30                               |                                                             |

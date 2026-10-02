@@ -54,3 +54,16 @@ export function ms(value: number | null): string {
 export function usd(value: number | string | null, digits = 4): string {
   return value === null ? "" : `$${Number(value).toFixed(digits)}`;
 }
+
+/** "2,400.00 USD": an amount from the records with its currency. */
+export function money(amount: string | number, currency: string): string {
+  const value = Number(amount);
+  return `${Number.isFinite(value) ? value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(amount)} ${currency.trim()}`;
+}
+
+/** "19 Aug 2026": a date-only value from the records (a Lagos calendar date, not an instant). */
+export function recordDate(isoDate: string | null): string {
+  if (!isoDate) return "";
+  const [year, month, day] = isoDate.slice(0, 10).split("-").map(Number) as [number, number, number];
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" }).format(new Date(Date.UTC(year, month - 1, day, 12)));
+}

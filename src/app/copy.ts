@@ -265,6 +265,13 @@ export const EMAIL = {
 // The support console (DESIGN §14)
 // ---------------------------------------------------------------------------
 
+/** When a page cannot be shown: plain words, a way forward, never a raw error. */
+export const ERRORS = {
+  notFound: { title: "We can't find that page", body: "The link may be old, or the address mistyped.", action: "Go to RelayPay support" },
+  broken: { title: "Something went wrong on our side", body: "Please try again. If it keeps happening, you can still get help from the support options in your RelayPay dashboard.", retry: "Try again", home: "Go to RelayPay support" },
+  console: { title: "This page couldn't load", body: "It may be a passing problem with our records. Try again; if it keeps happening, check Alerts or tell your developer.", retry: "Try again" },
+};
+
 export const CONSOLE = {
   title: "RelayPay support console",
   product: "Support console",
@@ -274,6 +281,7 @@ export const CONSOLE = {
     overview: "Overview",
     escalations: "Escalations",
     conversations: "Conversations",
+    customers: "Customers",
     knowledge: "Knowledge",
     alerts: "Alerts",
     evals: "Test runs",
@@ -427,6 +435,57 @@ export const CONSOLE = {
     transcript: "The conversation",
     openConversation: "Open the full conversation",
     ticket: "Ticket",
+  },
+  customers: {
+    heading: "Customers",
+    intro: "Every RelayPay customer and everything support has done with them. A conversation is linked to a customer once the caller is verified.",
+    count: (count: number) => `${count} ${count === 1 ? "customer" : "customers"}`,
+    conversations: (count: number) => `${count} ${count === 1 ? "conversation" : "conversations"}`,
+    open: (tickets: number, escalations: number) =>
+      [tickets ? `${tickets} open ${tickets === 1 ? "ticket" : "tickets"}` : null, escalations ? `${escalations} open ${escalations === 1 ? "escalation" : "escalations"}` : null].filter(Boolean).join(", ") || "Nothing open",
+    lastContact: (when: string) => `Last in touch ${when}`,
+    never: "No conversations yet",
+    back: "All customers",
+    notFound: "No such customer.",
+    view: "View customer",
+    labels: { email: "Email", plan: "Plan", account: "Account", identity: "Identity check", region: "Region", note: "Support note", customerId: "Customer ID" },
+    noNote: "None",
+    sections: { conversations: "Conversations", tickets: "Tickets", escalations: "Escalations", transactions: "Transactions", payouts: "Payouts" },
+    empty: {
+      conversations: "No verified conversations yet.",
+      tickets: "No tickets.",
+      escalations: "No escalations.",
+      transactions: "No transactions on record.",
+      payouts: "No payouts on record.",
+    },
+    matchedByEmail: "The caller wasn't verified; matched by the email they gave",
+    eta: (date: string) => `Estimated ${date}`,
+    noEta: "No estimate on record",
+    scheduled: (date: string) => `Scheduled ${date}`,
+    to: (country: string) => `to ${country}`,
+    failureReason: (reason: string) => `Reason on record: ${reason}`,
+    accountStatus: { active: "Active", restricted: "Restricted", "pending verification": "Waiting for business verification" } as Record<string, string>,
+    kyc: { approved: "Approved", pending: "Pending", "review required": "Review required" } as Record<string, string>,
+    confirmation: {
+      not_requested: "No confirmation asked for",
+      pending: "Confirmation being sent",
+      sent: "Confirmation emailed",
+      failed: "Confirmation email failed",
+      skipped_eval: "Test: no email",
+      skipped_undeliverable: "No confirmation: the address can't receive email",
+    } as Record<string, string>,
+  },
+  /** Who a conversation was with, on the conversation and escalation pages. */
+  customerCard: {
+    heading: "Customer",
+    verified: "Verified on this call",
+    unverified: "Not verified",
+    unverifiedBody: "The caller did not give two details that match one account, so no account records were shared with them.",
+    gave: "What the caller gave",
+    gaveNothing: "No name or email.",
+    name: "Name",
+    email: "Email",
+    failures: (count: number, locked: boolean) => (locked ? `Locked after ${count} failed identity checks: no lookups for the rest of the call.` : `${count} failed identity ${count === 1 ? "check" : "checks"}.`),
   },
   conversations: {
     heading: "Conversations",

@@ -6,6 +6,7 @@ import { ms, usd, when } from "@/lib/console/format";
 import { conversationDetail } from "@/lib/console/queries";
 
 import styles from "../../console.module.css";
+import { CustomerCard } from "../../customer-card";
 import { describeTools } from "../../describe";
 import { channelLabel, endingLabel, outcomeLabel, outcomeTone, StatusText } from "../../parts";
 import { Transcript } from "../../transcript";
@@ -24,11 +25,15 @@ export async function ConversationArticle({ id, query }: { id: string; query: In
   const c = CONSOLE.conversation;
   if (!detail) return <InboxPlaceholder icon={<ChatIcon size={22} />} title={c.notFound} text={CONSOLE.conversations.select} />;
 
-  const { conversation, turns, tickets, escalations } = detail;
+  const { conversation, customer, turns, tickets, escalations } = detail;
   const actions = describeTools(turns.flatMap((turn) => turn.tools));
   const firstReply = median(turns.map((turn) => turn.ttft_ms).filter((value): value is number => value !== null));
+  // What an unverified caller said about themselves, from what they asked us to record.
+  const gave = {
+    names: [...new Set(escalations.map((item) => item.user_name).filter(Boolean))],
+    emails: [...new Set([...escalations.map((item) => item.user_email), ...tickets.map((item) => item.contact_email)].filter((email): email is string => Boolean(email)))],
+  };
   const facts = [
-    { label: c.customer, value: conversation.verified_customer_id ? c.verifiedAs(conversation.verified_customer_id) : c.notVerified },
     { label: c.replies, value: String(conversation.turn_count) },
     { label: c.firstReply, value: ms(firstReply) },
     { label: c.agentSpend, value: usd(conversation.agent_cost_estimate_usd) },
@@ -80,9 +85,12 @@ export async function ConversationArticle({ id, query }: { id: string; query: In
         {tickets.map((item) => (
           <p key={item.ticket_ref} className={styles.summaryNote}>
             <span className={styles.ref}>{item.ticket_ref}</span> {item.summary}
+            {item.contact_email && <span className={styles.summaryNoteSub}>{CONSOLE.customers.confirmation[item.confirmation_status] ?? item.confirmation_status}</span>}
           </p>
         ))}
       </section>
+
+      <CustomerCard customer={customer} failures={conversation.verification_failures} gave={gave} />
 
       <h3 className={styles.transcriptHeading}>{c.turns}</h3>
       <Transcript turns={turns} />

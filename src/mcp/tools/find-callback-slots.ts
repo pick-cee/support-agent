@@ -1,7 +1,7 @@
 import * as chrono from "chrono-node";
 import * as z from "zod";
 
-import { BOOKING_HORIZON_DAYS, SLOT_ALTERNATIVES } from "@/lib/constants";
+import { BOOKING_HORIZON_DAYS, SLOT_ALTERNATIVES, SLOT_SEARCH_DAYS } from "@/lib/constants";
 import { resolveZone, speakSlot, zoneOffsetMinutes, zoneSpokenName } from "@/lib/zones";
 
 import { lenientInput } from "../lenient-input";
@@ -79,15 +79,25 @@ export const findCallbackSlots: ToolDefinition<{ preferred_time_text: string; ti
       };
     }
 
-    // From the requested time (or the start of the requested day) up to three days on.
+    // From the requested time (or the start of the requested day) up to a week on,
+    // never past the booking horizon. "Friday at 10am" with Friday booked and a
+    // weekend after it found nothing in three days, and the caller was offered
+    // no time at all (eval, 2026-10-02).
     const dayStart = new Date(Math.max(now.getTime(), parsed.hourGiven ? parsed.start.getTime() - 4 * 3_600_000 : parsed.start.getTime() - 12 * 3_600_000));
-    const slots = await services.calendar.slots({ startUtc: dayStart, endUtc: new Date(dayStart.getTime() + 3 * DAY_MS), timeZone: zone });
+    const searchEnd = new Date(Math.min(dayStart.getTime() + SLOT_SEARCH_DAYS * DAY_MS, now.getTime() + BOOKING_HORIZON_DAYS * DAY_MS));
+    const slots = await services.calendar.slots({ startUtc: dayStart, endUtc: searchEnd, timeZone: zone });
     const future = slots.filter((slot) => slot.start.getTime() > now.getTime()).sort((a, b) => a.start.getTime() - b.start.getTime());
     const requestedAvailable = requested !== null && future.some((slot) => slot.start.getTime() === requested.getTime());
     const after = requested ? future.filter((slot) => slot.start.getTime() >= requested.getTime()) : future;
     const alternatives = (requestedAvailable ? [] : (after.length ? after : future))
       .slice(0, SLOT_ALTERNATIVES)
       .map((slot) => ({ start_utc: slot.start.toISOString(), speakable: speakSlot(slot.start, zone) }));
+
+    // What was offered stays on the conversation: the caller answers next turn, a
+    // fresh agent run that no longer has this result (FAILURES 37). Written even
+    // when empty, so an earlier search's times are not offered again.
+    const offered = requestedAvailable ? [{ start_utc: requested!.toISOString(), speakable: base.requested_speakable!, timezone: zone }] : alternatives.map((slot) => ({ ...slot, timezone: zone }));
+    if (context.conversationId) await repository.setOfferedSlots(context.conversationId, offered);
 
     return {
       status: "ok",

@@ -9,7 +9,31 @@ import type { NextConfig } from "next";
 // (node_modules is on disk) and fail every typed message on Vercel.
 const AGENT_PROGRAM = ["./node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/**/*"];
 
+// Sent with every response (DESIGN §17). No other site may frame a page (the
+// console's buttons cannot be clickjacked), the browser never guesses a content
+// type, only this site may use the microphone, and HTTPS is remembered. The
+// policy stops short of limiting scripts and connections: the voice call loads
+// and connects to Vapi's and Daily's servers, and a wrong list there would
+// silently break every call.
+const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "microphone=(self), camera=(), geolocation=(), payment=(), usb=()" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+];
+
 const nextConfig: NextConfig = {
+  async headers() {
+    return [
+      { source: "/:path*", headers: SECURITY_HEADERS },
+      // The console holds customer details: never indexed, never cached by a browser or proxy.
+      { source: "/console/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }, { key: "Cache-Control", value: "no-store" }] },
+      { source: "/console", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }, { key: "Cache-Control", value: "no-store" }] },
+    ];
+  },
   // next dev appends its own agent-rules block to CLAUDE.md when it detects a
   // coding agent. CLAUDE.md is Akin's file, and the block carries an em dash.
   agentRules: false,

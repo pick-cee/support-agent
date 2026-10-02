@@ -122,6 +122,8 @@ export const ESCALATION_CATEGORIES = ["compliance", "account", "dispute", "payme
 export const CALLBACK_DURATION_MIN = 30;
 export const SLOT_ALTERNATIVES = 2;
 export const BOOKING_HORIZON_DAYS = 14;
+/** How far past the requested day the nearest free times are looked for: a weekend and a busy day once left nothing to offer in three. */
+export const SLOT_SEARCH_DAYS = 7;
 export const CALLBACK_EVENT_TYPE_TITLE = "RelayPay support callback";
 export const CALLBACK_EVENT_TYPE_SLUG = "relaypay-support-callback";
 

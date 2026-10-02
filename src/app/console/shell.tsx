@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { CONSOLE, PAGE } from "@/app/copy";
-import { BellIcon, BookIcon, ChatIcon, ClipboardIcon, CloseIcon, FlagIcon, GridIcon, LogoutIcon, MenuIcon, SlidersIcon } from "@/app/icons";
+import { BellIcon, BookIcon, ChatIcon, ClipboardIcon, CloseIcon, FlagIcon, GridIcon, LogoutIcon, MenuIcon, SlidersIcon, UserIcon } from "@/app/icons";
 
 import styles from "./console.module.css";
 
@@ -20,6 +20,7 @@ const GROUPS = [
     links: [
       { href: "/console/escalations", label: CONSOLE.nav.escalations, Icon: FlagIcon, count: "escalations" as const },
       { href: "/console/conversations", label: CONSOLE.nav.conversations, Icon: ChatIcon, count: null },
+      { href: "/console/customers", label: CONSOLE.nav.customers, Icon: UserIcon, count: null },
     ],
   },
   { label: CONSOLE.nav.groups.improve, links: [{ href: "/console/knowledge", label: CONSOLE.nav.knowledge, Icon: BookIcon, count: null }] },

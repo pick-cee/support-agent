@@ -353,6 +353,14 @@ describe("privacy", () => {
     expect(gate({ callerTexts: ["Tomorrow at 2pm."], toolCalls: [slots], answer: answer({ answer_type: "collect_details", spoken_text: "I have Wednesday 30 September at 2 PM Lagos time. Is that okay?" }) }).passed).toBe(true);
   });
 
+  it("lets a time offered on an earlier turn be repeated without a new search, and nothing else", () => {
+    const offeredSlots = ["Thursday 1 October at 3 PM Lagos time"];
+    const repeat = answer({ answer_type: "collect_details", spoken_text: "Just to confirm, Thursday 1 October at 3 PM Lagos time?" });
+    expect(gate({ callerTexts: ["The Thursday one."], offeredSlots, answer: repeat }).passed).toBe(true);
+    expect(failedGates(gate({ callerTexts: ["The Thursday one."], answer: repeat }))).toEqual(["numbers"]);
+    expect(failedGates(gate({ callerTexts: ["The Thursday one."], offeredSlots, answer: answer({ answer_type: "collect_details", spoken_text: "Is Friday 2 October at 4 PM okay?" }) }))).toEqual(["numbers"]);
+  });
+
   it("asks a caller mid-collection to repeat, rather than starting over", () => {
     const verdict = gate({ answer: answer({ answer_type: "collect_details", spoken_text: "I'll write to efua@accrastack.example." }) });
     expect(verdict.fallback).toEqual({ text: SPOKEN.fallbackCollect, answerType: "collect_details" });

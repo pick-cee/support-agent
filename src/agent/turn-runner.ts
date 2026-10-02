@@ -1,5 +1,6 @@
 import { FILLER_PHRASES, SPOKEN, VOICE_TO_TYPED } from "@/app/copy";
 import type { AlertInput } from "@/lib/alerts";
+import type { OfferedSlot } from "@/mcp/types";
 import { REPAIR_MIN_MS, TURN_DEADLINE_MS } from "@/lib/constants";
 
 import type { Answer, AnswerType } from "./answer";
@@ -22,6 +23,8 @@ export type TurnRequest = {
   verified: boolean;
   escalated: boolean;
   clarifyStreak: number;
+  /** Callback times offered on an earlier turn, from the conversation row (FAILURES 37). */
+  offeredSlots?: OfferedSlot[];
   model: string;
   now: Date;
   /** Aborts when the caller interrupts or disconnects. */
@@ -135,7 +138,7 @@ export async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
     try {
       return await request.runAgent({
         prompt: turnPrompt(request.transcript, repair),
-        systemPrompt: systemPrompt({ now: request.now, verified: request.verified, escalated: request.escalated, clarifyStreak: request.clarifyStreak, channel: request.channel }),
+        systemPrompt: systemPrompt({ now: request.now, verified: request.verified, escalated: request.escalated, clarifyStreak: request.clarifyStreak, channel: request.channel, offeredSlots: request.offeredSlots }),
         model: request.model,
         conversationId: request.conversationId,
         turnId: request.turnId,
@@ -160,7 +163,7 @@ export async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
   const callerTexts = request.transcript.filter((line) => line.role === "caller").map((line) => line.text);
   const gate = (answer: Answer, toolCalls: AgentRun["toolCalls"]): { verdict: GateVerdict; sentences: string[] } => {
     const code = codeSentences(toolCalls, request.now);
-    const verdict = runGates({ answer, toolCalls, callerTexts, escalated: request.escalated, clarifyStreak: request.clarifyStreak, covers: code.covers });
+    const verdict = runGates({ answer, toolCalls, callerTexts, escalated: request.escalated, clarifyStreak: request.clarifyStreak, covers: code.covers, offeredSlots: request.offeredSlots?.map((slot) => slot.speakable) });
     return { verdict, sentences: code.sentences };
   };
 

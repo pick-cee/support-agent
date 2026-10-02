@@ -1,6 +1,7 @@
 import "server-only";
 
 import { queryDb } from "@/lib/db";
+import type { OfferedSlot } from "@/mcp/types";
 
 import type { TurnOutcome } from "./turn-runner";
 
@@ -14,6 +15,8 @@ export type ConversationRow = {
   escalation_id: string | null;
   clarify_streak: number;
   turn_count: number;
+  /** Callback times the last slot search offered; null before any (FAILURES 37). */
+  offered_slots: OfferedSlot[] | null;
 };
 
 export async function upsertConversation(input: { vapiCallId: string; channel: "web" | "phone" | "eval"; callerIdentifier: string | null }): Promise<ConversationRow> {
@@ -23,7 +26,7 @@ export async function upsertConversation(input: { vapiCallId: string; channel: "
      on conflict (vapi_call_id) do update
        set updated_at = now(),
            caller_identifier = coalesce(support_agent.conversations.caller_identifier, excluded.caller_identifier)
-     returning id, verified_customer_id, escalation_id, clarify_streak, turn_count`,
+     returning id, verified_customer_id, escalation_id, clarify_streak, turn_count, offered_slots`,
     [input.vapiCallId, input.channel, input.callerIdentifier],
   );
   return result.rows[0]!;
@@ -36,7 +39,7 @@ export type TextConversationRow = ConversationRow & { channel: string; final_sta
 export async function createTextConversation(visitor: string): Promise<TextConversationRow> {
   const result = await queryDb<TextConversationRow>(
     `insert into support_agent.conversations (channel, caller_identifier, started_at) values ('text', $1, now())
-     returning id, channel, final_status, verified_customer_id, escalation_id, clarify_streak, turn_count`,
+     returning id, channel, final_status, verified_customer_id, escalation_id, clarify_streak, turn_count, offered_slots`,
     [visitor],
   );
   return result.rows[0]!;
@@ -45,7 +48,7 @@ export async function createTextConversation(visitor: string): Promise<TextConve
 /** The conversation id is the customer's only handle on it: a UUID the server created and gave to that browser alone. */
 export async function loadTextConversation(conversationId: string): Promise<TextConversationRow | null> {
   const result = await queryDb<TextConversationRow>(
-    `select id, channel, final_status, verified_customer_id, escalation_id, clarify_streak, turn_count
+    `select id, channel, final_status, verified_customer_id, escalation_id, clarify_streak, turn_count, offered_slots
        from support_agent.conversations where id = $1 and channel = 'text'`,
     [conversationId],
   );
@@ -67,16 +70,16 @@ export async function textTranscript(conversationId: string): Promise<{ user_tex
  * (a double submit). Two racing inserts collide on the unique key; the loser
  * gets null too.
  */
-export async function beginTextTurn(conversationId: string, userText: string, staleSeconds: number): Promise<{ id: string; turn_index: number } | null> {
+export async function beginTextTurn(conversationId: string, userText: string, staleSeconds: number): Promise<{ id: string; turn_index: number; attempt: number } | null> {
   try {
-    const result = await queryDb<{ id: string; turn_index: number }>(
+    const result = await queryDb<{ id: string; turn_index: number; attempt: number }>(
       `insert into support_agent.conversation_turns (conversation_id, turn_index, user_text)
        select $1, coalesce(max(turn_index) + 1, 0), $2 from support_agent.conversation_turns where conversation_id = $1
        having not exists (
          select 1 from support_agent.conversation_turns
           where conversation_id = $1 and status = 'in_progress' and updated_at > now() - make_interval(secs => $3)
        )
-       returning id, turn_index`,
+       returning id, turn_index, attempt`,
       [conversationId, userText, staleSeconds],
     );
     return result.rows[0] ?? null;
@@ -127,14 +130,21 @@ export async function beginTurn(input: { conversationId: string; turnIndex: numb
   return result.rows[0]!;
 }
 
-export async function finishTurn(turnId: string, outcome: TurnOutcome): Promise<void> {
-  await queryDb(
+/**
+ * Writes a turn's result, only if this is still the turn's latest attempt.
+ * Vapi re-sends a turn while the caller keeps talking; the first attempt's
+ * slower model answer could finish last and overwrite what the caller actually
+ * heard (FAILURES 53). False: superseded, nothing written.
+ */
+export async function finishTurn(turn: { id: string; attempt: number }, outcome: TurnOutcome): Promise<boolean> {
+  const turnId = turn.id;
+  const written = await queryDb(
     `update support_agent.conversation_turns
         set spoken_text = $2, answer_type = $3, reply_source = $4, confidence_note = $5, kb_chunk_ids = $6,
             gate_results = $7, repaired = $21, fallback_used = $8, filler_used = $9, status = $10, error = $11,
             model = $12, input_tokens = $13, output_tokens = $14, cache_read_tokens = $15, cache_write_tokens = $16,
             cost_estimate_usd = $17, ttft_ms = $18, total_ms = $19, timings = $20, grounding = $22, updated_at = now()
-      where id = $1`,
+      where id = $1 and attempt = $23`,
     [
       turnId,
       outcome.spokenText,
@@ -158,8 +168,10 @@ export async function finishTurn(turnId: string, outcome: TurnOutcome): Promise<
       JSON.stringify({ ...outcome.timings, mcp_status: outcome.mcpStatus, speech_stripped: outcome.speechStripped }),
       outcome.repaired,
       outcome.grounding,
+      turn.attempt,
     ],
   );
+  if (!written.rowCount) return false;
   // The retrieval log says which chunks the spoken answer actually rested on (DESIGN §7.3).
   if (outcome.kbChunkIds.length) {
     await queryDb(
@@ -169,23 +181,26 @@ export async function finishTurn(turnId: string, outcome: TurnOutcome): Promise<
       [turnId, outcome.kbChunkIds],
     );
   }
+  return true;
 }
 
-/** A turn answered by a cheap check: no model, no cost. */
-export async function finishCheapTurn(turnId: string, input: { spokenText: string; answerType: string; reason: string; ttftMs: number }): Promise<void> {
-  await queryDb(
+/** A turn answered by a cheap check: no model, no cost. Only for the turn's latest attempt, as finishTurn. */
+export async function finishCheapTurn(turn: { id: string; attempt: number }, input: { spokenText: string; answerType: string; reason: string; ttftMs: number }): Promise<boolean> {
+  const written = await queryDb(
     `update support_agent.conversation_turns
         set spoken_text = $2, answer_type = $3, reply_source = 'cheap_check', status = 'ok', confidence_note = $4,
             ttft_ms = $5, total_ms = $5, cost_estimate_usd = 0, updated_at = now()
-      where id = $1`,
-    [turnId, input.spokenText, input.answerType, `No model call: ${input.reason}.`, input.ttftMs],
+      where id = $1 and attempt = $6`,
+    [turn.id, input.spokenText, input.answerType, `No model call: ${input.reason}.`, input.ttftMs, turn.attempt],
   );
+  return Boolean(written.rowCount);
 }
 
-export async function recordTurnOnConversation(conversationId: string, input: { turnIndex: number; clarifyStreak: number; costEstimateUsd: number }): Promise<void> {
+/** clarifyStreak null: a superseded attempt, whose cost counts but whose answer does not. */
+export async function recordTurnOnConversation(conversationId: string, input: { turnIndex: number; clarifyStreak: number | null; costEstimateUsd: number }): Promise<void> {
   await queryDb(
     `update support_agent.conversations
-        set turn_count = greatest(turn_count, $2), clarify_streak = $3,
+        set turn_count = greatest(turn_count, $2), clarify_streak = coalesce($3, clarify_streak),
             agent_cost_estimate_usd = agent_cost_estimate_usd + $4, updated_at = now()
       where id = $1`,
     [conversationId, input.turnIndex + 1, input.clarifyStreak, input.costEstimateUsd],
